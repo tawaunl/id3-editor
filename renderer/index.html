@@ -1,0 +1,1086 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Tag Editor</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#161618;--surface:#1e1e20;--surface2:#26262a;--surface3:#2e2e34;
+  --border:#2e2e32;--accent:#6366f1;--accent-dim:#4f52c4;--accent-glow:rgba(99,102,241,.18);
+  --text:#e8e8ec;--text-dim:#888890;--text-muted:#555560;
+  --success:#22c55e;--error:#f87171;--warn:#f59e0b;
+  --radius:10px;--radius-sm:6px;
+}
+html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;font-size:13px;background:var(--bg);color:var(--text);overflow:hidden;-webkit-font-smoothing:antialiased;user-select:none}
+#app{display:flex;height:100vh}
+
+/* ── Sidebar ── */
+#sidebar{width:240px;min-width:180px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;padding-top:48px;-webkit-app-region:drag}
+#sidebar-header{padding:12px 12px 8px;-webkit-app-region:no-drag;display:flex;flex-direction:column;gap:6px}
+#sidebar-top-row{display:flex;align-items:center;justify-content:space-between}
+#sidebar-title{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted)}
+#sidebar-icons{display:flex;gap:4px}
+.icon-btn{width:26px;height:26px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface2);color:var(--text-dim);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .15s}
+.icon-btn:hover{background:var(--surface3);color:var(--text)}
+.icon-btn.active{background:var(--accent-glow);border-color:var(--accent);color:var(--accent)}
+#open-btn{width:100%;padding:7px 10px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;transition:background .15s;-webkit-app-region:no-drag}
+#open-btn:hover{background:var(--surface3)}
+#file-list{flex:1;overflow-y:auto;padding:8px;-webkit-app-region:no-drag}
+#file-list::-webkit-scrollbar{width:4px}
+#file-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.file-item{padding:8px 10px;border-radius:var(--radius-sm);cursor:pointer;display:flex;flex-direction:column;gap:2px;transition:background .1s;position:relative}
+.file-item:hover{background:var(--surface2)}
+.file-item.selected{background:rgba(99,102,241,.2)}
+.file-item.primary{background:var(--accent)}
+.file-item.primary .file-name{color:#fff}
+.file-item.primary .file-meta{color:rgba(255,255,255,.6)}
+.file-item.dirty::after{content:'';position:absolute;right:9px;top:50%;transform:translateY(-50%);width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.file-item.primary.dirty::after{background:rgba(255,255,255,.75)}
+.file-item.selected.dirty::after{background:var(--accent)}
+.file-name{font-size:12px;font-weight:500;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.file-meta{font-size:10px;color:var(--text-muted)}
+#empty-sidebar{padding:20px 14px;color:var(--text-muted);font-size:12px;line-height:1.6}
+#sel-hint{padding:8px 16px;font-size:11px;color:var(--text-muted);border-top:1px solid var(--border);-webkit-app-region:no-drag;display:none}
+
+/* ── Main ── */
+#main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+#toolbar{height:48px;-webkit-app-region:drag;display:flex;align-items:center;justify-content:space-between;padding:0 16px;border-bottom:1px solid var(--border);flex-shrink:0}
+#toolbar-left{display:flex;align-items:center;gap:8px;-webkit-app-region:no-drag}
+#toolbar-right{display:flex;align-items:center;gap:8px;-webkit-app-region:no-drag}
+.autosave-pill{display:flex;align-items:center;gap:6px;padding:4px 10px;border-radius:20px;border:1px solid var(--border);background:var(--surface2);font-size:11px;cursor:pointer;transition:all .15s;color:var(--text-dim)}
+.autosave-pill.on{border-color:var(--success);color:var(--success);background:rgba(34,197,94,.08)}
+.autosave-pill .dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+.btn{padding:6px 14px;border-radius:var(--radius-sm);border:none;font-size:12px;font-weight:500;cursor:pointer;transition:opacity .15s,background .15s}
+.btn:disabled{opacity:.35;cursor:not-allowed}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover:not(:disabled){background:var(--accent-dim)}
+.btn-secondary{background:var(--surface2);color:var(--text);border:1px solid var(--border)}
+.btn-secondary:hover:not(:disabled){background:var(--surface3)}
+.btn-sm{padding:4px 10px;font-size:11px}
+
+#content{flex:1;overflow-y:auto;padding:28px 32px;position:relative}
+#content::-webkit-scrollbar{width:6px}
+#content::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+
+/* ── Empty ── */
+#empty-state{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:var(--text-muted)}
+#empty-state svg{opacity:.25}
+#empty-state h2{font-size:18px;font-weight:600;color:var(--text-dim)}
+#empty-state p{font-size:13px;text-align:center;max-width:280px;line-height:1.6}
+
+/* ── Drop overlay ── */
+#drop-overlay{display:none;position:fixed;inset:0;background:rgba(99,102,241,.12);border:2px dashed var(--accent);border-radius:var(--radius);z-index:999;align-items:center;justify-content:center;font-size:18px;font-weight:600;color:var(--accent);pointer-events:none}
+#drop-overlay.visible{display:flex}
+
+/* ── Single editor ── */
+#editor{display:grid;grid-template-columns:200px 1fr;gap:32px;max-width:820px}
+#art-column{display:flex;flex-direction:column;gap:10px}
+#art-container{width:200px;height:200px;border-radius:var(--radius);border:1px solid var(--border);background:var(--surface2);overflow:hidden;position:relative;cursor:pointer}
+#art-container:hover #art-overlay{opacity:1}
+#art-img{width:100%;height:100%;object-fit:cover;display:none}
+#art-placeholder{width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--text-muted);font-size:11px}
+#art-overlay{position:absolute;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .2s;font-size:11px;font-weight:600;color:#fff;gap:6px}
+.art-actions{display:flex;gap:6px}
+.art-btn{flex:1;padding:6px 0;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface2);color:var(--text-dim);font-size:11px;cursor:pointer;text-align:center;transition:background .1s}
+.art-btn:hover{background:var(--surface3)}
+.art-btn.danger:hover{background:#3a1818;color:var(--error);border-color:var(--error)}
+#file-info{padding:10px 12px;border-radius:var(--radius-sm);background:var(--surface2);border:1px solid var(--border)}
+.info-row{display:flex;justify-content:space-between;font-size:11px;color:var(--text-dim);padding:2px 0}
+.info-label{color:var(--text-muted)}
+#fields-column{display:flex;flex-direction:column;gap:0}
+.section-label{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text-muted);padding:18px 0 8px}
+.section-label:first-child{padding-top:0}
+.field-group{display:grid;gap:10px}
+.field-group.cols-2{grid-template-columns:1fr 1fr}
+.field-group.cols-3{grid-template-columns:1fr 1fr 1fr}
+.field{display:flex;flex-direction:column;gap:5px}
+label{font-size:11px;font-weight:500;color:var(--text-dim)}
+input[type=text]{padding:7px 10px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:13px;font-family:inherit;outline:none;transition:border-color .15s;width:100%;user-select:text}
+input[type=text]:focus{border-color:var(--accent)}
+input[type=text]::placeholder{color:var(--text-muted)}
+input[type=text].mixed{border-color:var(--warn);color:var(--warn)}
+
+/* ── Lookup strip ── */
+#lookup-strip{display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:18px}
+#lookup-query{flex:1;padding:6px 10px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:12px;font-family:inherit;outline:none;user-select:text}
+#lookup-query:focus{border-color:var(--accent)}
+#lookup-status{font-size:11px;color:var(--text-muted);white-space:nowrap}
+
+/* ── Lookup results panel ── */
+#lookup-results{margin-bottom:20px;display:none}
+#lookup-results-inner{display:flex;flex-direction:column;gap:6px;max-height:280px;overflow-y:auto;padding-right:4px}
+#lookup-results-inner::-webkit-scrollbar{width:4px}
+#lookup-results-inner::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.result-card{padding:10px 12px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface2);cursor:pointer;display:flex;gap:12px;align-items:center;transition:border-color .15s}
+.result-card:hover{border-color:var(--accent)}
+.result-thumb{width:44px;height:44px;border-radius:4px;background:var(--surface3);flex-shrink:0;overflow:hidden;display:flex;align-items:center;justify-content:center;color:var(--text-muted)}
+.result-thumb img{width:100%;height:100%;object-fit:cover}
+.result-info{flex:1;min-width:0}
+.result-title{font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.result-sub{font-size:11px;color:var(--text-dim);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.result-source{font-size:10px;color:var(--text-muted);margin-top:3px}
+.result-badge{padding:2px 7px;border-radius:10px;font-size:10px;font-weight:600;background:var(--accent-glow);color:var(--accent);white-space:nowrap;flex-shrink:0}
+
+/* ── Rename bar ── */
+#rename-bar{display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);margin-top:18px}
+#rename-template{flex:1;padding:6px 10px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:12px;font-family:inherit;outline:none;user-select:text}
+#rename-template:focus{border-color:var(--accent)}
+#rename-preview{font-size:11px;color:var(--text-muted);padding:4px 10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1.2}
+.token-chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.token-chip{padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:var(--surface3);border:1px solid var(--border);color:var(--text-dim);cursor:pointer;transition:background .1s}
+.token-chip:hover{background:var(--accent-glow);border-color:var(--accent);color:var(--accent)}
+
+/* ── Bulk editor ── */
+#bulk-editor{max-width:820px}
+#bulk-header{display:flex;align-items:center;gap:14px;padding:16px 18px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:20px}
+#bulk-icon{width:44px;height:44px;background:var(--accent-glow);border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+#bulk-title{font-size:15px;font-weight:600;color:var(--text)}
+#bulk-subtitle{font-size:12px;color:var(--text-muted);margin-top:3px}
+.bulk-note{font-size:11px;color:var(--text-muted);padding:8px 12px;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);border-radius:var(--radius-sm);margin-bottom:20px;line-height:1.5}
+#bulk-art-row{display:flex;align-items:flex-start;gap:16px;margin-bottom:22px}
+#bulk-art-thumb{width:80px;height:80px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface2);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;position:relative;cursor:pointer}
+#bulk-art-thumb img{width:100%;height:100%;object-fit:cover;display:none}
+#bulk-art-thumb:hover .bulk-art-overlay{opacity:1}
+.bulk-art-overlay{position:absolute;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .2s;font-size:10px;font-weight:600;color:#fff}
+#bulk-art-info{display:flex;flex-direction:column;gap:8px;justify-content:center}
+#bulk-art-label{font-size:12px;font-weight:500;color:var(--text-dim)}
+#bulk-art-desc{font-size:11px;color:var(--text-muted);line-height:1.5}
+.bulk-art-btns{display:flex;gap:6px}
+
+/* ── Settings panel ── */
+#settings-panel{display:none;position:absolute;top:0;right:0;bottom:0;width:340px;background:var(--surface);border-left:1px solid var(--border);z-index:100;flex-direction:column;overflow-y:auto}
+#settings-panel.open{display:flex}
+#settings-panel::-webkit-scrollbar{width:4px}
+#settings-panel::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+#settings-header{padding:20px 20px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+#settings-header h2{font-size:14px;font-weight:600}
+.settings-section{padding:16px 20px;border-bottom:1px solid var(--border)}
+.settings-section h3{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted);margin-bottom:12px}
+.setting-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:8px}
+.setting-row:last-child{margin-bottom:0}
+.setting-label{font-size:12px;color:var(--text);flex:1}
+.setting-desc{font-size:11px;color:var(--text-muted);margin-top:3px;line-height:1.4}
+.toggle{width:36px;height:20px;border-radius:10px;border:none;cursor:pointer;position:relative;transition:background .2s;flex-shrink:0;background:var(--surface3)}
+.toggle.on{background:var(--accent)}
+.toggle::after{content:'';position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:#fff;transition:transform .2s;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.toggle.on::after{transform:translateX(16px)}
+.settings-input{width:100%;padding:6px 10px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:12px;font-family:inherit;outline:none;margin-top:6px;user-select:text}
+.settings-input:focus{border-color:var(--accent)}
+.settings-input::placeholder{color:var(--text-muted)}
+
+/* ── Toast ── */
+#toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(16px);background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:8px 18px;font-size:12px;font-weight:500;color:var(--text);opacity:0;transition:opacity .2s,transform .2s;pointer-events:none;white-space:nowrap;z-index:1000}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+#toast.success{color:var(--success);border-color:var(--success)}
+#toast.error{color:var(--error);border-color:var(--error)}
+#toast.warn{color:var(--warn);border-color:var(--warn)}
+</style>
+</head>
+<body>
+<div id="drop-overlay">Drop audio files here</div>
+<div id="toast"></div>
+
+<div id="app">
+<!-- ── Sidebar ── -->
+<div id="sidebar">
+  <div id="sidebar-header">
+    <div id="sidebar-top-row">
+      <div id="sidebar-title">Files</div>
+      <div id="sidebar-icons">
+        <div class="icon-btn" id="autosave-icon-btn" title="Toggle auto-save" onclick="toggleAutoSave()">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M13 13H3V3h7l3 3v7z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/><rect x="5" y="9" width="6" height="4" rx=".5" stroke="currentColor" stroke-width="1.3" fill="none"/><rect x="6" y="3" width="4" height="3" rx=".5" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>
+        </div>
+        <div class="icon-btn" id="settings-icon-btn" title="Settings" onclick="toggleSettings()">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="2.5" stroke="currentColor" stroke-width="1.4"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M2.93 2.93l1.41 1.41M11.66 11.66l1.41 1.41M2.93 13.07l1.41-1.41M11.66 4.34l1.41-1.41" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        </div>
+      </div>
+    </div>
+    <button id="open-btn" onclick="openFiles()">
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 3h5l2 2h5v9H2V3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" fill="none"/></svg>
+      Open Files
+    </button>
+  </div>
+  <div id="file-list"><div id="empty-sidebar">Drop files here or click Open Files.</div></div>
+  <div id="sel-hint"></div>
+</div>
+
+<!-- ── Main ── -->
+<div id="main">
+  <div id="toolbar">
+    <div id="toolbar-left">
+      <div class="autosave-pill" id="autosave-pill" onclick="toggleAutoSave()" title="Toggle auto-save">
+        <div class="dot"></div>
+        <span id="autosave-label">Auto-save off</span>
+      </div>
+    </div>
+    <div id="toolbar-right">
+      <button class="btn btn-secondary" id="revert-btn" disabled onclick="revertSelected()">Revert</button>
+      <button class="btn btn-primary"   id="save-btn"   disabled onclick="saveSelected()">Save Tags</button>
+    </div>
+  </div>
+
+  <div id="content">
+    <!-- Settings panel (slides in over content) -->
+    <div id="settings-panel">
+      <div id="settings-header">
+        <h2>Settings</h2>
+        <div class="icon-btn" onclick="toggleSettings()">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 2l12 12M14 2L2 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        </div>
+      </div>
+      <div class="settings-section">
+        <h3>Auto-Save</h3>
+        <div class="setting-row">
+          <div><div class="setting-label">Auto-save on field change</div><div class="setting-desc">Saves 500 ms after you stop typing</div></div>
+          <button class="toggle" id="toggle-autosave-change" onclick="toggleSetting('autoSaveOnChange')"></button>
+        </div>
+        <div class="setting-row">
+          <div><div class="setting-label">Auto-save on file switch</div><div class="setting-desc">Saves when you select a different file</div></div>
+          <button class="toggle" id="toggle-autosave-switch" onclick="toggleSetting('autoSaveOnSwitch')"></button>
+        </div>
+      </div>
+      <div class="settings-section">
+        <h3>Lookup Sources</h3>
+        <div class="setting-row">
+          <div><div class="setting-label">MusicBrainz</div><div class="setting-desc">Free, no key required</div></div>
+          <button class="toggle on" id="toggle-mb" onclick="toggleSetting('useMusicBrainz')"></button>
+        </div>
+        <div class="setting-row">
+          <div><div class="setting-label">Discogs</div><div class="setting-desc">Requires a personal access token</div></div>
+          <button class="toggle" id="toggle-discogs" onclick="toggleSetting('useDiscogs')"></button>
+        </div>
+        <div class="setting-row">
+          <div><div class="setting-label">Last.fm</div><div class="setting-desc">Great for cover art; requires API key</div></div>
+          <button class="toggle" id="toggle-lastfm" onclick="toggleSetting('useLastFm')"></button>
+        </div>
+        <div style="margin-top:12px">
+          <label style="font-size:11px;color:var(--text-dim)">Discogs Personal Access Token</label>
+          <input class="settings-input" id="input-discogs-token" type="text" placeholder="Paste token here" oninput="onSettingInput()"/>
+        </div>
+        <div style="margin-top:10px">
+          <label style="font-size:11px;color:var(--text-dim)">Last.fm API Key</label>
+          <input class="settings-input" id="input-lastfm-key" type="text" placeholder="Paste API key here" oninput="onSettingInput()"/>
+        </div>
+      </div>
+      <div class="settings-section">
+        <h3>File Renaming</h3>
+        <div style="margin-bottom:8px">
+          <label style="font-size:11px;color:var(--text-dim)">Default rename template</label>
+          <input class="settings-input" id="input-rename-template" type="text" placeholder="{track} - {title}" oninput="onSettingInput()"/>
+        </div>
+        <div class="setting-desc" style="padding:0">Available tokens: {artist} {album} {title} {track} {year} {genre}</div>
+      </div>
+    </div>
+
+    <!-- Empty state -->
+    <div id="empty-state">
+      <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
+        <rect x="8" y="12" width="48" height="40" rx="4" stroke="#888" stroke-width="2"/>
+        <path d="M20 28h24M20 36h16" stroke="#888" stroke-width="2" stroke-linecap="round"/>
+        <circle cx="48" cy="44" r="8" fill="#1e1e20" stroke="#888" stroke-width="2"/>
+        <path d="M48 40v4l2 2" stroke="#888" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+      <h2>No file selected</h2>
+      <p>Open or drop audio files to start editing their tags.</p>
+    </div>
+
+    <!-- Single file editor -->
+    <div id="editor" style="display:none">
+      <div id="art-column">
+        <div id="art-container" onclick="pickCover()">
+          <img id="art-img" alt="Album art"/>
+          <div id="art-placeholder">
+            <svg width="32" height="32" viewBox="0 0 32 32" fill="none"><rect x="4" y="4" width="24" height="24" rx="3" stroke="currentColor" stroke-width="1.5" fill="none"/><circle cx="11" cy="12" r="2.5" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M4 22l6-6 5 5 4-4 9 9" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" fill="none"/></svg>
+            <span>No artwork</span>
+          </div>
+          <div id="art-overlay">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M11 2l3 3-9 9H2v-3L11 2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" fill="none"/></svg>
+            Change art
+          </div>
+        </div>
+        <div class="art-actions">
+          <div class="art-btn" onclick="pickCover()">Change</div>
+          <div class="art-btn danger" onclick="removeCover()">Remove</div>
+        </div>
+        <div id="file-info">
+          <div class="info-row"><span class="info-label">Format</span><span id="info-format">—</span></div>
+          <div class="info-row"><span class="info-label">Duration</span><span id="info-duration">—</span></div>
+          <div class="info-row"><span class="info-label">Bitrate</span><span id="info-bitrate">—</span></div>
+        </div>
+      </div>
+
+      <div id="fields-column">
+        <!-- Lookup strip -->
+        <div id="lookup-strip">
+          <input id="lookup-query" type="text" placeholder="Search MusicBrainz, Discogs, Last.fm…" onkeydown="if(event.key==='Enter')runLookup()"/>
+          <button class="btn btn-secondary btn-sm" onclick="autoFillQuery()">Auto</button>
+          <button class="btn btn-primary btn-sm" onclick="runLookup()">Search</button>
+          <span id="lookup-status"></span>
+        </div>
+
+        <!-- Results -->
+        <div id="lookup-results">
+          <div id="lookup-results-inner"></div>
+        </div>
+
+        <div class="section-label">Track Info</div>
+        <div class="field-group">
+          <div class="field"><label>Title</label><input type="text" id="f-title"  placeholder="Track title"  oninput="onFieldInput()"/></div>
+          <div class="field"><label>Artist</label><input type="text" id="f-artist" placeholder="Artist name"  oninput="onFieldInput()"/></div>
+          <div class="field"><label>Album</label><input type="text" id="f-album"  placeholder="Album name"   oninput="onFieldInput()"/></div>
+        </div>
+        <div class="section-label">Details</div>
+        <div class="field-group cols-3">
+          <div class="field"><label>Genre</label><input type="text" id="f-genre"  placeholder="Genre"   oninput="onFieldInput()"/></div>
+          <div class="field"><label>Year</label><input type="text" id="f-year"   placeholder="2024"    oninput="onFieldInput()"/></div>
+          <div class="field"><label>Track #</label><input type="text" id="f-track"  placeholder="1"  oninput="onFieldInput()"/></div>
+        </div>
+        <div class="field-group cols-3" style="margin-top:10px">
+          <div class="field"><label>Total Tracks</label><input type="text" id="f-total" placeholder="12" oninput="onFieldInput()"/></div>
+        </div>
+
+        <!-- Rename bar -->
+        <div id="rename-bar">
+          <div style="display:flex;flex-direction:column;gap:6px;flex:1;min-width:0">
+            <div style="display:flex;gap:8px;align-items:center">
+              <label style="white-space:nowrap;font-size:11px">Rename template</label>
+              <input id="rename-template" type="text" placeholder="{track} - {title}" oninput="updateRenamePreview()"/>
+              <button class="btn btn-secondary btn-sm" onclick="applyRename()">Rename</button>
+            </div>
+            <div class="token-chips" id="token-chips"></div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <span style="font-size:10px;color:var(--text-muted);white-space:nowrap">Preview:</span>
+              <div id="rename-preview">—</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bulk editor -->
+    <div id="bulk-editor" style="display:none">
+      <div id="bulk-header">
+        <div id="bulk-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="14" height="14" rx="2" stroke="#6366f1" stroke-width="1.5" fill="none"/><rect x="7" y="3" width="14" height="14" rx="2" stroke="#6366f1" stroke-width="1.5" fill="rgba(99,102,241,.15)"/></svg>
+        </div>
+        <div><div id="bulk-title">Bulk Edit</div><div id="bulk-subtitle"></div></div>
+      </div>
+      <div class="bulk-note">Only filled fields will be applied. Blank fields are left as-is. Title is always per-file.</div>
+      <div id="bulk-art-row">
+        <div id="bulk-art-thumb" onclick="bulkPickCover()">
+          <img id="bulk-art-img" alt="Shared art"/>
+          <div id="bulk-art-ph"><svg width="20" height="20" viewBox="0 0 32 32" fill="none"><rect x="4" y="4" width="24" height="24" rx="3" stroke="currentColor" stroke-width="1.5" fill="none"/><circle cx="11" cy="12" r="2.5" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M4 22l6-6 5 5 4-4 9 9" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" fill="none"/></svg></div>
+          <div class="bulk-art-overlay">Set art</div>
+        </div>
+        <div id="bulk-art-info">
+          <div id="bulk-art-label">Album Artwork</div>
+          <div id="bulk-art-desc">Set one image across all selected files.</div>
+          <div class="bulk-art-btns">
+            <div class="art-btn" onclick="bulkPickCover()">Set for all</div>
+            <div class="art-btn danger" onclick="bulkRemoveCover()">Remove from all</div>
+          </div>
+        </div>
+      </div>
+      <div class="section-label">Apply to All Selected</div>
+      <div class="field-group">
+        <div class="field"><label>Artist</label><input type="text" id="bf-artist" placeholder="Leave blank to keep each file's value"/></div>
+        <div class="field"><label>Album</label><input type="text" id="bf-album"  placeholder="Leave blank to keep each file's value"/></div>
+      </div>
+      <div class="section-label">Details</div>
+      <div class="field-group cols-3">
+        <div class="field"><label>Genre</label><input type="text" id="bf-genre" placeholder="—"/></div>
+        <div class="field"><label>Year</label><input type="text" id="bf-year"  placeholder="—"/></div>
+        <div class="field"><label>Total Tracks</label><input type="text" id="bf-total" placeholder="—"/></div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════════════════
+const files          = [];
+const selectedIndices = new Set();
+let primaryIndex     = -1;
+let lastClickIndex   = -1;
+let bulkArtPending   = null;
+let autoSaveTimer    = null;
+
+const settings = {
+  autoSaveOnChange:  false,
+  autoSaveOnSwitch:  false,
+  useMusicBrainz:    true,
+  useDiscogs:        false,
+  useLastFm:         false,
+  discogsToken:      '',
+  lastFmKey:         '',
+  renameTemplate:    '{track} - {title}',
+};
+
+const TOKENS = ['{artist}','{album}','{title}','{track}','{year}','{genre}'];
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════════════════
+(async () => {
+  const saved = await window.tagAPI.loadSettings();
+  Object.assign(settings, saved);
+  applySettingsToUI();
+  buildTokenChips();
+})();
+
+function buildTokenChips() {
+  const el = document.getElementById('token-chips');
+  el.innerHTML = TOKENS.map(t =>
+    `<div class="token-chip" onclick="insertToken('${t}')">${t}</div>`
+  ).join('');
+}
+
+function insertToken(tok) {
+  const inp = document.getElementById('rename-template');
+  const pos = inp.selectionStart;
+  const val = inp.value;
+  inp.value = val.slice(0,pos) + tok + val.slice(inp.selectionEnd);
+  inp.setSelectionRange(pos+tok.length, pos+tok.length);
+  inp.focus();
+  updateRenamePreview();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SETTINGS
+// ═══════════════════════════════════════════════════════════════════════════
+function applySettingsToUI() {
+  setToggle('toggle-autosave-change', settings.autoSaveOnChange);
+  setToggle('toggle-autosave-switch', settings.autoSaveOnSwitch);
+  setToggle('toggle-mb',      settings.useMusicBrainz);
+  setToggle('toggle-discogs', settings.useDiscogs);
+  setToggle('toggle-lastfm',  settings.useLastFm);
+  document.getElementById('input-discogs-token').value  = settings.discogsToken  || '';
+  document.getElementById('input-lastfm-key').value     = settings.lastFmKey     || '';
+  document.getElementById('input-rename-template').value = settings.renameTemplate || '{track} - {title}';
+  updateAutoSavePill();
+}
+
+function setToggle(id, on) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.toggle('on', !!on);
+}
+
+function toggleSetting(key) {
+  settings[key] = !settings[key];
+  applySettingsToUI();
+  persistSettings();
+}
+
+function onSettingInput() {
+  settings.discogsToken   = document.getElementById('input-discogs-token').value.trim();
+  settings.lastFmKey      = document.getElementById('input-lastfm-key').value.trim();
+  settings.renameTemplate = document.getElementById('input-rename-template').value;
+  persistSettings();
+}
+
+async function persistSettings() {
+  await window.tagAPI.saveSettings(settings);
+}
+
+function toggleSettings() {
+  const p = document.getElementById('settings-panel');
+  const btn = document.getElementById('settings-icon-btn');
+  const isOpen = p.classList.toggle('open');
+  btn.classList.toggle('active', isOpen);
+}
+
+function toggleAutoSave() {
+  // cycle: both off -> change only -> switch only -> both on -> both off
+  const { autoSaveOnChange: c, autoSaveOnSwitch: s } = settings;
+  if (!c && !s)      { settings.autoSaveOnChange = true;  settings.autoSaveOnSwitch = false; }
+  else if (c && !s)  { settings.autoSaveOnChange = false; settings.autoSaveOnSwitch = true;  }
+  else if (!c && s)  { settings.autoSaveOnChange = true;  settings.autoSaveOnSwitch = true;  }
+  else               { settings.autoSaveOnChange = false; settings.autoSaveOnSwitch = false; }
+  applySettingsToUI();
+  persistSettings();
+}
+
+function updateAutoSavePill() {
+  const { autoSaveOnChange: c, autoSaveOnSwitch: s } = settings;
+  const pill  = document.getElementById('autosave-pill');
+  const label = document.getElementById('autosave-label');
+  const icon  = document.getElementById('autosave-icon-btn');
+  const on    = c || s;
+  pill.classList.toggle('on', on);
+  icon.classList.toggle('active', on);
+  if (!on)    label.textContent = 'Auto-save off';
+  else if (c && s)  label.textContent = 'Auto-save on';
+  else if (c) label.textContent = 'Auto-save (typing)';
+  else        label.textContent = 'Auto-save (switch)';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FILE MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════════════
+async function openFiles() {
+  const paths = await window.tagAPI.openFiles();
+  if (paths && paths.length) await addFiles(paths);
+}
+
+async function addFiles(paths) {
+  for (const p of paths) {
+    if (files.find(f => f.path === p)) continue;
+    const tags = await window.tagAPI.readTags(p);
+    const name = p.split('/').pop();
+    files.push({ path:p, name, tags, originalTags: clone(tags), dirty:false });
+  }
+  renderFileList();
+  if (primaryIndex === -1 && files.length > 0) handleClick(0,false,false);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SELECTION
+// ═══════════════════════════════════════════════════════════════════════════
+function handleClick(index, shiftKey, metaKey) {
+  // auto-save on switch if enabled and leaving a dirty single selection
+  if (settings.autoSaveOnSwitch && selectedIndices.size === 1 && primaryIndex >= 0 && files[primaryIndex].dirty) {
+    saveSingleFile(primaryIndex);
+  }
+
+  if (shiftKey && lastClickIndex !== -1) {
+    const lo = Math.min(lastClickIndex, index), hi = Math.max(lastClickIndex, index);
+    for (let i = lo; i <= hi; i++) selectedIndices.add(i);
+    primaryIndex = index;
+  } else if (metaKey) {
+    if (selectedIndices.has(index)) {
+      selectedIndices.delete(index);
+      if (primaryIndex === index) {
+        const arr = [...selectedIndices];
+        primaryIndex = arr.length > 0 ? arr[arr.length-1] : -1;
+      }
+    } else {
+      selectedIndices.add(index);
+      primaryIndex = index;
+    }
+    lastClickIndex = index;
+  } else {
+    selectedIndices.clear();
+    selectedIndices.add(index);
+    primaryIndex = lastClickIndex = index;
+  }
+
+  renderFileList();
+  renderEditor();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RENDER FILE LIST
+// ═══════════════════════════════════════════════════════════════════════════
+function renderFileList() {
+  const list = document.getElementById('file-list');
+  if (!files.length) {
+    list.innerHTML = '<div id="empty-sidebar">Drop files here or click Open Files.</div>';
+    document.getElementById('sel-hint').style.display = 'none';
+    return;
+  }
+  list.innerHTML = files.map((f,i) => {
+    const isPrimary  = i === primaryIndex;
+    const isSelected = selectedIndices.has(i) && !isPrimary;
+    const cls = ['file-item', isPrimary?'primary':'', isSelected?'selected':'', f.dirty?'dirty':''].filter(Boolean).join(' ');
+    return `<div class="${cls}" onclick="handleClick(${i},event.shiftKey,event.metaKey||event.ctrlKey)">
+      <div class="file-name">${escHtml(f.name)}</div>
+      <div class="file-meta">${escHtml(f.tags.format||'')}${f.tags.duration?' · '+fmtDur(f.tags.duration):''}</div>
+    </div>`;
+  }).join('');
+
+  const hint = document.getElementById('sel-hint');
+  if (selectedIndices.size > 1) { hint.style.display = 'block'; hint.textContent = `${selectedIndices.size} files selected`; }
+  else hint.style.display = 'none';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RENDER EDITOR
+// ═══════════════════════════════════════════════════════════════════════════
+function renderEditor() {
+  const count = selectedIndices.size;
+  hide('empty-state'); hide('editor'); hide('bulk-editor');
+  if (count === 0)      { show('empty-state'); }
+  else if (count === 1) { show('editor');      populateSingleEditor(primaryIndex); }
+  else                  { show('bulk-editor'); populateBulkEditor(); }
+  updateToolbar();
+}
+
+function populateSingleEditor(index) {
+  const f = files[index]; if (!f) return;
+  const t = f.tags;
+  setVal('f-title', t.title||'');
+  setVal('f-artist', t.artist||'');
+  setVal('f-album', t.album||'');
+  setVal('f-genre', t.genre||'');
+  setVal('f-year', t.year||'');
+  setVal('f-track', t.trackNumber||'');
+  setVal('f-total', t.trackTotal||'');
+  ['f-title','f-artist','f-album','f-genre','f-year','f-track','f-total'].forEach(id => document.getElementById(id).classList.remove('mixed'));
+
+  if (t.coverBase64) {
+    document.getElementById('art-img').src = `data:${t.coverMime};base64,${t.coverBase64}`;
+    document.getElementById('art-img').style.display = 'block';
+    document.getElementById('art-placeholder').style.display = 'none';
+  } else {
+    document.getElementById('art-img').style.display = 'none';
+    document.getElementById('art-placeholder').style.display = 'flex';
+  }
+  document.getElementById('info-format').textContent   = t.format||'—';
+  document.getElementById('info-duration').textContent = t.duration ? fmtDur(t.duration) : '—';
+  document.getElementById('info-bitrate').textContent  = t.bitrate  ? Math.round(t.bitrate/1000)+' kbps' : '—';
+
+  // auto-fill lookup query
+  autoFillQuery();
+  // set rename template from settings
+  document.getElementById('rename-template').value = settings.renameTemplate || '{track} - {title}';
+  updateRenamePreview();
+  document.getElementById('lookup-results').style.display = 'none';
+  document.getElementById('lookup-status').textContent = '';
+}
+
+function populateBulkEditor() {
+  const sel = [...selectedIndices].map(i => files[i]);
+  document.getElementById('bulk-subtitle').textContent = `${sel.length} files · changes apply to all selected`;
+  bulkArtPending = null;
+
+  const firstCover = sel[0].tags.coverBase64;
+  const sharedCover = sel.every(f => f.tags.coverBase64 === firstCover);
+  const bulkImg = document.getElementById('bulk-art-img');
+  const bulkPh  = document.getElementById('bulk-art-ph');
+  if (sharedCover && firstCover) {
+    bulkImg.src = `data:${sel[0].tags.coverMime};base64,${firstCover}`;
+    bulkImg.style.display='block'; bulkPh.style.display='none';
+    document.getElementById('bulk-art-desc').textContent = 'All selected files share this artwork.';
+  } else {
+    bulkImg.style.display='none'; bulkPh.style.display='flex';
+    document.getElementById('bulk-art-desc').textContent = sharedCover ? 'No artwork on any file.' : 'Mixed artwork across files.';
+  }
+
+  [['bf-artist','artist'],['bf-album','album'],['bf-genre','genre'],['bf-year','year'],['bf-total','trackTotal']].forEach(([id,key]) => {
+    const vals    = sel.map(f => f.tags[key]||'');
+    const allSame = vals.every(v => v === vals[0]);
+    const el      = document.getElementById(id);
+    el.classList.remove('mixed');
+    el.value = allSame ? (vals[0]||'') : '';
+    if (!allSame) { el.placeholder = 'Mixed values'; el.classList.add('mixed'); }
+    else el.placeholder = 'Leave blank to keep each file\'s value';
+    el.oninput = () => el.classList.remove('mixed');
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FIELD INPUT / AUTO-SAVE
+// ═══════════════════════════════════════════════════════════════════════════
+function onFieldInput() {
+  if (primaryIndex < 0 || selectedIndices.size !== 1) return;
+  files[primaryIndex].dirty = true;
+  renderFileList();
+  updateToolbar();
+  updateRenamePreview();
+
+  if (settings.autoSaveOnChange) {
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = setTimeout(() => saveSingleFile(primaryIndex), 500);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TOOLBAR
+// ═══════════════════════════════════════════════════════════════════════════
+function updateToolbar() {
+  const count   = selectedIndices.size;
+  const saveBtn = document.getElementById('save-btn');
+  const revBtn  = document.getElementById('revert-btn');
+  if (count === 0) { saveBtn.disabled = revBtn.disabled = true; saveBtn.textContent = 'Save Tags'; return; }
+  saveBtn.disabled = false;
+  if (count === 1) {
+    const dirty = files[primaryIndex] && files[primaryIndex].dirty;
+    revBtn.disabled = !dirty;
+    saveBtn.textContent = 'Save Tags';
+  } else {
+    revBtn.disabled = false;
+    saveBtn.textContent = `Save ${count} Files`;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SAVE / REVERT
+// ═══════════════════════════════════════════════════════════════════════════
+async function saveSelected() {
+  const count = selectedIndices.size; if (!count) return;
+  const saveBtn = document.getElementById('save-btn');
+  saveBtn.disabled = true;
+  saveBtn.textContent = count === 1 ? 'Saving…' : `Saving 0 / ${count}…`;
+  if (count === 1) await saveSingleFile(primaryIndex);
+  else             await saveBulkFiles(count);
+  saveBtn.textContent = count === 1 ? 'Save Tags' : `Save ${count} Files`;
+  saveBtn.disabled = false;
+}
+
+async function saveSingleFile(index) {
+  const file = files[index];
+  const tags = {
+    ...file.tags,
+    title:       getVal('f-title'),
+    artist:      getVal('f-artist'),
+    album:       getVal('f-album'),
+    genre:       getVal('f-genre'),
+    year:        getVal('f-year'),
+    trackNumber: getVal('f-track'),
+    trackTotal:  getVal('f-total'),
+  };
+  const r = await window.tagAPI.writeTags(file.path, tags);
+  if (r.error) { showToast('Error: '+r.error,'error'); return; }
+  file.tags = tags; file.originalTags = clone(tags); file.dirty = false;
+  renderFileList(); updateToolbar();
+  showToast('Saved', 'success');
+}
+
+async function saveBulkFiles(total) {
+  const saveBtn   = document.getElementById('save-btn');
+  const bulkArtist = getVal('bf-artist').trim();
+  const bulkAlbum  = getVal('bf-album').trim();
+  const bulkGenre  = getVal('bf-genre').trim();
+  const bulkYear   = getVal('bf-year').trim();
+  const bulkTotal  = getVal('bf-total').trim();
+  const indices   = [...selectedIndices];
+  let saved=0, errors=0;
+  for (const i of indices) {
+    const file = files[i];
+    const tags = {...file.tags};
+    if (bulkArtist) tags.artist     = bulkArtist;
+    if (bulkAlbum)  tags.album      = bulkAlbum;
+    if (bulkGenre)  tags.genre      = bulkGenre;
+    if (bulkYear)   tags.year       = bulkYear;
+    if (bulkTotal)  tags.trackTotal = bulkTotal;
+    if (bulkArtPending === 'remove') { tags.coverBase64=null; tags.coverMime=null; }
+    else if (bulkArtPending && bulkArtPending.base64) { tags.coverBase64=bulkArtPending.base64; tags.coverMime=bulkArtPending.mime; }
+    const r = await window.tagAPI.writeTags(file.path, tags);
+    if (r.error) errors++; else { file.tags=tags; file.originalTags=clone(tags); file.dirty=false; saved++; }
+    saveBtn.textContent = `Saving ${saved} / ${total}…`;
+  }
+  bulkArtPending = null;
+  renderFileList(); updateToolbar();
+  showToast(errors===0 ? `Saved ${saved} files` : `${saved} saved, ${errors} failed`, errors===0?'success':'warn');
+  populateBulkEditor();
+}
+
+function revertSelected() {
+  for (const i of selectedIndices) {
+    const f = files[i]; f.tags=clone(f.originalTags); f.dirty=false;
+  }
+  bulkArtPending = null;
+  renderFileList(); renderEditor();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COVER ART
+// ═══════════════════════════════════════════════════════════════════════════
+async function pickCover() {
+  if (selectedIndices.size !== 1) return;
+  const r = await window.tagAPI.pickCover(); if (!r) return;
+  files[primaryIndex].tags.coverBase64 = r.base64;
+  files[primaryIndex].tags.coverMime   = r.mime;
+  files[primaryIndex].dirty = true;
+  renderFileList(); populateSingleEditor(primaryIndex); updateToolbar();
+}
+function removeCover() {
+  if (primaryIndex < 0) return;
+  files[primaryIndex].tags.coverBase64 = null;
+  files[primaryIndex].tags.coverMime   = null;
+  files[primaryIndex].dirty = true;
+  renderFileList(); populateSingleEditor(primaryIndex); updateToolbar();
+}
+async function bulkPickCover() {
+  const r = await window.tagAPI.pickCover(); if (!r) return;
+  bulkArtPending = r;
+  const bulkImg = document.getElementById('bulk-art-img');
+  bulkImg.src = `data:${r.mime};base64,${r.base64}`; bulkImg.style.display='block';
+  document.getElementById('bulk-art-ph').style.display = 'none';
+  document.getElementById('bulk-art-desc').textContent = 'New artwork staged. Save to apply.';
+}
+function bulkRemoveCover() {
+  bulkArtPending = 'remove';
+  document.getElementById('bulk-art-img').style.display='none';
+  document.getElementById('bulk-art-ph').style.display='flex';
+  document.getElementById('bulk-art-desc').textContent = 'Artwork will be removed on save.';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LOOKUP
+// ═══════════════════════════════════════════════════════════════════════════
+function autoFillQuery() {
+  const f = files[primaryIndex]; if (!f) return;
+  const t = f.tags;
+  const parts = [t.artist, t.title].filter(Boolean);
+  document.getElementById('lookup-query').value = parts.join(' ') || f.name.replace(/\.[^.]+$/,'');
+}
+
+async function runLookup() {
+  const query = document.getElementById('lookup-query').value.trim();
+  if (!query) return;
+  const statusEl  = document.getElementById('lookup-status');
+  const resultsEl = document.getElementById('lookup-results');
+  const innerEl   = document.getElementById('lookup-results-inner');
+  statusEl.textContent = 'Searching…';
+  resultsEl.style.display = 'none';
+  innerEl.innerHTML = '';
+
+  const promises = [];
+  if (settings.useMusicBrainz) promises.push(searchMusicBrainz(query));
+  if (settings.useDiscogs && settings.discogsToken) promises.push(searchDiscogs(query));
+  if (settings.useLastFm && settings.lastFmKey) promises.push(searchLastFm(query));
+
+  if (!promises.length) { statusEl.textContent = 'No sources enabled in settings.'; return; }
+
+  const allResults = (await Promise.allSettled(promises))
+    .flatMap(r => r.status==='fulfilled' ? r.value : [])
+    .sort((a,b) => (b.score||0)-(a.score||0));
+
+  statusEl.textContent = allResults.length ? `${allResults.length} result${allResults.length>1?'s':''}` : 'No results found.';
+  if (!allResults.length) return;
+
+  innerEl.innerHTML = allResults.map((r,i) => `
+    <div class="result-card" onclick="applyResult(${i})">
+      <div class="result-thumb" id="rthumb-${i}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M12 8v8M8 12h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      </div>
+      <div class="result-info">
+        <div class="result-title">${escHtml(r.title||'Unknown')}</div>
+        <div class="result-sub">${escHtml([r.artist,r.album].filter(Boolean).join(' — '))}</div>
+        <div class="result-source">${escHtml(r.source)} ${r.year?'· '+r.year:''} ${r.genre?'· '+r.genre:''}</div>
+      </div>
+      <div class="result-badge">${escHtml(r.source)}</div>
+    </div>
+  `).join('');
+
+  resultsEl.style.display = 'block';
+  window._lookupResults = allResults;
+
+  // async: load cover thumbs
+  allResults.forEach((r,i) => {
+    if (r.coverUrl) loadThumb(i, r.coverUrl);
+  });
+}
+
+function loadThumb(i, url) {
+  const el = document.getElementById('rthumb-'+i); if (!el) return;
+  window.tagAPI.fetchUrl(url).then(r => {
+    if (r && r.ok && r.base64) {
+      el.innerHTML = `<img src="data:${r.mime};base64,${r.base64}" alt=""/>`;
+    }
+  }).catch(()=>{});
+}
+
+function applyResult(i) {
+  const r   = window._lookupResults[i];
+  const idx = primaryIndex; if (idx < 0) return;
+  const f   = files[idx];
+
+  if (r.title)  { setVal('f-title',  r.title);  f.tags.title  = r.title; }
+  if (r.artist) { setVal('f-artist', r.artist); f.tags.artist = r.artist; }
+  if (r.album)  { setVal('f-album',  r.album);  f.tags.album  = r.album; }
+  if (r.genre)  { setVal('f-genre',  r.genre);  f.tags.genre  = r.genre; }
+  if (r.year)   { setVal('f-year',   r.year);   f.tags.year   = r.year; }
+  if (r.trackNumber) { setVal('f-track', r.trackNumber); f.tags.trackNumber = r.trackNumber; }
+
+  if (r.coverUrl) {
+    window.tagAPI.fetchUrl(r.coverUrl).then(res => {
+      if (res && res.ok && res.base64) {
+        f.tags.coverBase64 = res.base64;
+        f.tags.coverMime   = res.mime;
+        f.dirty = true;
+        populateSingleEditor(idx);
+        renderFileList();
+        updateToolbar();
+      }
+    });
+  }
+
+  f.dirty = true;
+  renderFileList(); updateToolbar(); updateRenamePreview();
+  showToast('Tags applied from '+r.source, 'success');
+  document.getElementById('lookup-results').style.display='none';
+
+  if (settings.autoSaveOnChange) {
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = setTimeout(() => saveSingleFile(idx), 500);
+  }
+}
+
+// ── MusicBrainz ────────────────────────────────────────────────────────────
+async function searchMusicBrainz(query) {
+  const url = `https://musicbrainz.org/ws/2/recording/?query=${encodeURIComponent(query)}&limit=5&fmt=json`;
+  const r   = await window.tagAPI.fetchUrl(url, { 'User-Agent':'TagEditor/1.0 (tageditor@local)' });
+  if (!r.ok || !r.text) return [];
+  const data = JSON.parse(r.text);
+  return (data.recordings||[]).map(rec => {
+    const release = (rec.releases||[])[0] || {};
+    const artist  = (rec['artist-credit']||[]).map(a=>a.name||a.artist?.name).filter(Boolean).join(', ');
+    const genre   = (rec.genres||release.genres||[])[0]?.name || '';
+    const year    = (release.date||'').slice(0,4);
+    const mbid    = release.id;
+    return {
+      source:'MusicBrainz', score: rec.score||0,
+      title: rec.title, artist, album: release.title||'', year, genre,
+      trackNumber: rec.position ? String(rec.position) : '',
+      coverUrl: mbid ? `https://coverartarchive.org/release/${mbid}/front-250` : null,
+    };
+  });
+}
+
+// ── Discogs ────────────────────────────────────────────────────────────────
+async function searchDiscogs(query) {
+  const url = `https://api.discogs.com/database/search?q=${encodeURIComponent(query)}&type=release&per_page=5&token=${settings.discogsToken}`;
+  const r   = await window.tagAPI.fetchUrl(url);
+  if (!r.ok || !r.text) return [];
+  const data = JSON.parse(r.text);
+  return (data.results||[]).map((item,idx) => {
+    const parts  = (item.title||'').split(' - ');
+    const artist = parts.length>1 ? parts[0] : '';
+    const album  = parts.length>1 ? parts[1] : item.title;
+    const year   = item.year ? String(item.year) : '';
+    const genre  = (item.genre||item.style||[])[0]||'';
+    return {
+      source:'Discogs', score: 80-idx,
+      title: album, artist, album, year, genre,
+      coverUrl: item.cover_image||item.thumb||null,
+    };
+  });
+}
+
+// ── Last.fm ────────────────────────────────────────────────────────────────
+async function searchLastFm(query) {
+  const url = `https://ws.audioscrobbler.com/2.0/?method=track.search&track=${encodeURIComponent(query)}&api_key=${settings.lastFmKey}&format=json&limit=5`;
+  const r   = await window.tagAPI.fetchUrl(url);
+  if (!r.ok || !r.text) return [];
+  const data = JSON.parse(r.text);
+  const tracks = data?.results?.trackmatches?.track||[];
+  return (Array.isArray(tracks) ? tracks : [tracks]).map((t,idx) => {
+    const images = t.image||[];
+    const coverUrl = images.find(i=>i.size==='large')||images[images.length-1];
+    return {
+      source:'Last.fm', score: 70-idx,
+      title: t.name, artist: t.artist, album:'', year:'', genre:'',
+      coverUrl: coverUrl ? coverUrl['#text'] : null,
+    };
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FILE RENAME
+// ═══════════════════════════════════════════════════════════════════════════
+function buildName(template, tags, fallbackName) {
+  const ext = fallbackName.match(/(\.[^.]+)$/)?.[1]||'';
+  let name = template || '{track} - {title}';
+  name = name.replace(/\{artist\}/g, sanitize(tags.artist||''))
+             .replace(/\{album\}/g,  sanitize(tags.album||''))
+             .replace(/\{title\}/g,  sanitize(tags.title||''))
+             .replace(/\{track\}/g,  sanitize(tags.trackNumber ? tags.trackNumber.padStart(2,'0') : ''))
+             .replace(/\{year\}/g,   sanitize(tags.year||''))
+             .replace(/\{genre\}/g,  sanitize(tags.genre||''));
+  // clean up empty segments like " - " or "02 - "
+  name = name.replace(/\s*-\s*$/, '').replace(/^\s*-\s*/, '').trim();
+  return name ? name + ext : fallbackName;
+}
+
+function sanitize(s) { return s.replace(/[/\\:*?"<>|]/g,'_').trim(); }
+
+function updateRenamePreview() {
+  if (primaryIndex < 0) return;
+  const f    = files[primaryIndex];
+  const tags = {
+    ...f.tags,
+    title:       getVal('f-title'),
+    artist:      getVal('f-artist'),
+    album:       getVal('f-album'),
+    genre:       getVal('f-genre'),
+    year:        getVal('f-year'),
+    trackNumber: getVal('f-track'),
+  };
+  const tpl  = document.getElementById('rename-template').value || settings.renameTemplate || '{track} - {title}';
+  const name = buildName(tpl, tags, f.name);
+  document.getElementById('rename-preview').textContent = name;
+}
+
+async function applyRename() {
+  if (primaryIndex < 0) return;
+  const f    = files[primaryIndex];
+  const tpl  = document.getElementById('rename-template').value || settings.renameTemplate || '{track} - {title}';
+  const tags = {
+    ...f.tags,
+    title:       getVal('f-title'),
+    artist:      getVal('f-artist'),
+    album:       getVal('f-album'),
+    genre:       getVal('f-genre'),
+    year:        getVal('f-year'),
+    trackNumber: getVal('f-track'),
+  };
+  const ext  = f.name.match(/(\.[^.]+)$/)?.[1]||'';
+  const base = buildName(tpl, tags, f.name).replace(/\.[^.]+$/,'');
+  const r    = await window.tagAPI.renameFile(f.path, base);
+  if (r.error) { showToast('Rename failed: '+r.error, 'error'); return; }
+  f.path = r.newPath;
+  f.name = r.newPath.split('/').pop();
+  renderFileList();
+  showToast('File renamed', 'success');
+  // update settings default template
+  settings.renameTemplate = tpl;
+  document.getElementById('input-rename-template').value = tpl;
+  persistSettings();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DRAG AND DROP
+// ═══════════════════════════════════════════════════════════════════════════
+document.addEventListener('dragover', e => { e.preventDefault(); document.getElementById('drop-overlay').classList.add('visible'); });
+document.addEventListener('dragleave', e => { if (!e.relatedTarget) document.getElementById('drop-overlay').classList.remove('visible'); });
+document.addEventListener('drop', async e => {
+  e.preventDefault(); document.getElementById('drop-overlay').classList.remove('visible');
+  const paths = [];
+  for (const f of e.dataTransfer.files) { if (/\.(mp3|flac|aac|m4a|wav|aiff?)/i.test(f.name)) paths.push(f.path); }
+  if (paths.length) await addFiles(paths);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// KEYBOARD
+// ═══════════════════════════════════════════════════════════════════════════
+document.addEventListener('keydown', e => {
+  if ((e.metaKey||e.ctrlKey) && e.key==='s') { e.preventDefault(); if (!document.getElementById('save-btn').disabled) saveSelected(); }
+  if ((e.key==='ArrowDown'||e.key==='ArrowUp') && files.length) {
+    const focused = document.activeElement;
+    if (focused && (focused.tagName==='INPUT'||focused.tagName==='TEXTAREA')) return;
+    e.preventDefault();
+    const dir = e.key==='ArrowDown'?1:-1;
+    const next = Math.max(0, Math.min(files.length-1, (primaryIndex<0?0:primaryIndex)+dir));
+    handleClick(next, e.shiftKey, false);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
+function show(id) { const el=document.getElementById(id); if(el) el.style.display=''; }
+function hide(id) { const el=document.getElementById(id); if(el) el.style.display='none'; }
+function getVal(id) { return document.getElementById(id)?.value||''; }
+function setVal(id,v){ const el=document.getElementById(id); if(el) el.value=v; }
+function clone(o) { return JSON.parse(JSON.stringify(o)); }
+function fmtDur(s) { const m=Math.floor(s/60); return `${m}:${Math.floor(s%60).toString().padStart(2,'0')}`; }
+function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+let toastTimer;
+function showToast(msg, type='') {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.className = 'show '+(type||'');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>{ el.className=''; }, 2800);
+}
+</script>
+</body>
+</html>

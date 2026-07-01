@@ -1,0 +1,37 @@
+{
+  "name": "id3-editor",
+  "version": "1.0.0",
+  "description": "ID3 tag editor for Mac",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --mac"
+  },
+  "dependencies": {
+    "fluent-ffmpeg": "^2.1.3",
+    "music-metadata": "^11.13.0",
+    "node-id3": "^0.2.9"
+  },
+  "devDependencies": {
+    "electron": "^42.5.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.tawaun.id3editor",
+    "productName": "TagEditor",
+    "mac": {
+      "category": "public.app-category.music",
+      "target": "dmg"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "node_modules/**/*"
+    ]
+  },
+  "allowScripts": {
+    "electron@31.7.7": true,
+    "electron-winstaller@5.4.0": true
+  }
+}
