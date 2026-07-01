@@ -67,6 +67,23 @@ npm run build
 
 This produces a `.dmg` in the `dist/` folder you can distribute or install.
 
+## Change the app icon (macOS)
+
+1. Add your icon image as `assets/icon-source.png` at 1024x1024 pixels.
+2. Generate the macOS icon file:
+
+```bash
+npm run icon:mac
+```
+
+3. Build the installer:
+
+```bash
+npm run build
+```
+
+The generated file `assets/icon.icns` is used for both the app bundle icon and the DMG icon.
+
 ## Notes
 
 - Tag writes happen in-place; the original file is overwritten.

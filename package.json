@@ -5,7 +5,9 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder --mac"
+    "build": "electron-builder --mac",
+    "build:mac": "electron-builder --mac",
+    "icon:mac": "bash scripts/generate-mac-icon.sh"
   },
   "dependencies": {
     "fluent-ffmpeg": "^2.1.3",
@@ -21,7 +23,11 @@
     "productName": "TagEditor",
     "mac": {
       "category": "public.app-category.music",
-      "target": "dmg"
+      "target": "dmg",
+      "icon": "assets/icon.icns"
+    },
+    "dmg": {
+      "icon": "assets/icon.icns"
     },
     "files": [
       "main.js",
