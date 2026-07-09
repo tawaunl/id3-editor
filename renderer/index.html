@@ -248,6 +248,10 @@ input[type=text].mixed{border-color:var(--warn);color:var(--warn)}
           <button class="toggle on" id="toggle-mb" onclick="toggleSetting('useMusicBrainz')"></button>
         </div>
         <div class="setting-row">
+          <div><div class="setting-label">iTunes</div><div class="setting-desc">Apple catalog metadata, no key required</div></div>
+          <button class="toggle on" id="toggle-itunes" onclick="toggleSetting('useITunes')"></button>
+        </div>
+        <div class="setting-row">
           <div><div class="setting-label">Discogs</div><div class="setting-desc">Requires a personal access token</div></div>
           <button class="toggle" id="toggle-discogs" onclick="toggleSetting('useDiscogs')"></button>
         </div>
@@ -314,7 +318,7 @@ input[type=text].mixed{border-color:var(--warn);color:var(--warn)}
       <div id="fields-column">
         <!-- Lookup strip -->
         <div id="lookup-strip">
-          <input id="lookup-query" type="text" placeholder="Search MusicBrainz, Discogs, Last.fm…" onkeydown="if(event.key==='Enter')runLookup()"/>
+          <input id="lookup-query" type="text" placeholder="Search MusicBrainz, iTunes, Discogs, Last.fm…" onkeydown="if(event.key==='Enter')runLookup()"/>
           <button class="btn btn-secondary btn-sm" onclick="autoFillQuery()">Auto</button>
           <button class="btn btn-primary btn-sm" onclick="runLookup()">Search</button>
           <span id="lookup-status"></span>
@@ -414,6 +418,7 @@ const settings = {
   autoSaveOnChange:  false,
   autoSaveOnSwitch:  false,
   useMusicBrainz:    true,
+  useITunes:         true,
   useDiscogs:        false,
   useLastFm:         false,
   discogsToken:      '',
@@ -457,6 +462,7 @@ function applySettingsToUI() {
   setToggle('toggle-autosave-change', settings.autoSaveOnChange);
   setToggle('toggle-autosave-switch', settings.autoSaveOnSwitch);
   setToggle('toggle-mb',      settings.useMusicBrainz);
+  setToggle('toggle-itunes',  settings.useITunes !== false);
   setToggle('toggle-discogs', settings.useDiscogs);
   setToggle('toggle-lastfm',  settings.useLastFm);
   document.getElementById('input-discogs-token').value  = settings.discogsToken  || '';
@@ -834,6 +840,7 @@ async function runLookup() {
 
   const promises = [];
   if (settings.useMusicBrainz) promises.push(searchMusicBrainz(query));
+  if (settings.useITunes !== false) promises.push(searchITunes(query));
   if (settings.useDiscogs && settings.discogsToken) promises.push(searchDiscogs(query));
   if (settings.useLastFm && settings.lastFmKey) promises.push(searchLastFm(query));
 
@@ -931,6 +938,31 @@ async function searchMusicBrainz(query) {
       title: rec.title, artist, album: release.title||'', year, genre,
       trackNumber: rec.position ? String(rec.position) : '',
       coverUrl: mbid ? `https://coverartarchive.org/release/${mbid}/front-250` : null,
+    };
+  });
+}
+
+// ── iTunes ────────────────────────────────────────────────────────────────
+async function searchITunes(query) {
+  const url = `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=song&limit=8`;
+  const r   = await window.tagAPI.fetchUrl(url);
+  if (!r.ok || !r.text) return [];
+
+  const data = JSON.parse(r.text);
+  return (data.results||[]).map((item, idx) => {
+    const year = (item.releaseDate||'').slice(0,4);
+    const hiResArtwork = item.artworkUrl100
+      ? item.artworkUrl100.replace(/100x100bb\.jpg$/, '600x600bb.jpg')
+      : null;
+    return {
+      source:'iTunes', score: 90-idx,
+      title: item.trackName || item.collectionName || '',
+      artist: item.artistName || '',
+      album: item.collectionName || '',
+      year,
+      genre: item.primaryGenreName || '',
+      trackNumber: item.trackNumber ? String(item.trackNumber) : '',
+      coverUrl: hiResArtwork || item.artworkUrl100 || null,
     };
   });
 }
