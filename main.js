@@ -36,6 +36,96 @@ function getFfmpegPath() {
   return 'ffmpeg';
 }
 
+function guessImageMime(buf) {
+  if (!buf || buf.length < 12) return 'image/jpeg';
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png';
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return 'image/gif';
+  if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 && buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) return 'image/webp';
+  return 'image/jpeg';
+}
+
+function normalizeImageMime(inputMime, fallback = 'image/jpeg') {
+  const s = String(inputMime || '').trim().toLowerCase();
+  if (!s) return fallback;
+
+  // strip parameters like "image/jpeg; charset=binary"
+  const base = s.split(';')[0].trim();
+  if (base === 'jpg' || base === 'jpeg' || base === 'image/jpg' || base === 'image/jpeg') return 'image/jpeg';
+  if (base === 'png' || base === 'image/png') return 'image/png';
+  if (base === 'webp' || base === 'image/webp') return 'image/webp';
+  if (base === 'gif' || base === 'image/gif') return 'image/gif';
+  return base.startsWith('image/') ? base : fallback;
+}
+
+function extractPictureCandidate(value) {
+  if (!value) return null;
+
+  if (Buffer.isBuffer(value)) {
+    return { data: value, format: '' };
+  }
+
+  if (value instanceof Uint8Array) {
+    return { data: Buffer.from(value), format: '' };
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = extractPictureCandidate(item);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  if (typeof value === 'object') {
+    if (value.data && (Buffer.isBuffer(value.data) || value.data instanceof Uint8Array)) {
+      return {
+        data: Buffer.isBuffer(value.data) ? value.data : Buffer.from(value.data),
+        format: value.format || value.mime || value.type || '',
+      };
+    }
+
+    if (value.picture && (Buffer.isBuffer(value.picture) || value.picture instanceof Uint8Array)) {
+      return {
+        data: Buffer.isBuffer(value.picture) ? value.picture : Buffer.from(value.picture),
+        format: value.format || value.mime || value.type || '',
+      };
+    }
+  }
+
+  return null;
+}
+
+function extractCoverFromMetadata(md) {
+  const c = md.common || {};
+  if (Array.isArray(c.picture) && c.picture.length > 0) {
+    const pic = c.picture[0];
+    const buf = Buffer.isBuffer(pic.data) ? pic.data : Buffer.from(pic.data || '');
+    if (buf.length > 0) {
+      return {
+        coverBase64: buf.toString('base64'),
+        coverMime: normalizeImageMime(pic.format, guessImageMime(buf)),
+      };
+    }
+  }
+
+  // Fallback: inspect native frames/atoms for embedded artwork (APIC/covr/FLAC picture blocks).
+  const native = md.native || {};
+  for (const list of Object.values(native)) {
+    if (!Array.isArray(list)) continue;
+    for (const entry of list) {
+      const candidate = extractPictureCandidate(entry && entry.value);
+      if (!candidate || !candidate.data || !candidate.data.length) continue;
+      return {
+        coverBase64: candidate.data.toString('base64'),
+        coverMime: normalizeImageMime(candidate.format, guessImageMime(candidate.data)),
+      };
+    }
+  }
+
+  return { coverBase64: null, coverMime: null };
+}
+
 // ── open files dialog ──────────────────────────────────────────────────────
 ipcMain.handle('open-files', async () => {
   const r = await dialog.showOpenDialog(mainWindow, {
@@ -51,11 +141,7 @@ ipcMain.handle('read-tags', async (_e, filePath) => {
     const { parseFile } = await import('music-metadata');
     const md = await parseFile(filePath, { skipCovers: false });
     const c  = md.common;
-    let coverBase64 = null, coverMime = null;
-    if (c.picture && c.picture.length > 0) {
-      coverBase64 = c.picture[0].data.toString('base64');
-      coverMime   = c.picture[0].format;
-    }
+    const { coverBase64, coverMime } = extractCoverFromMetadata(md);
     return {
       title: c.title||'', artist: c.artist||'', album: c.album||'',
       genre: (c.genre&&c.genre[0])||'',
@@ -101,13 +187,16 @@ ipcMain.handle('write-tags', async (_e, filePath, tags) => {
 
     let coverTmpPath = null;
     const coverArgs = [];
-    if (tags.coverBase64 && tags.coverMime) {
-      coverTmpPath = path.join(os.tmpdir(),`cover_${Date.now()}.jpg`);
-      fs.writeFileSync(coverTmpPath, Buffer.from(tags.coverBase64,'base64'));
+    if (tags.coverBase64) {
+      const coverBuffer = Buffer.from(tags.coverBase64,'base64');
+      const coverMime = normalizeImageMime(tags.coverMime, guessImageMime(coverBuffer));
+      const coverExt = coverMime === 'image/png' ? '.png' : (coverMime === 'image/webp' ? '.webp' : '.jpg');
+      coverTmpPath = path.join(os.tmpdir(),`cover_${Date.now()}${coverExt}`);
+      fs.writeFileSync(coverTmpPath, coverBuffer);
       if (ext==='.flac') {
         coverArgs.push('-i',coverTmpPath,'-map','0:a','-map','1:v','-c:a','copy','-c:v','mjpeg','-disposition:v','attached_pic');
       } else if (ext==='.m4a'||ext==='.aac') {
-        coverArgs.push('-i',coverTmpPath,'-map','0:a','-map','1:v','-c:a','copy','-c:v','copy');
+        coverArgs.push('-i',coverTmpPath,'-map','0:a','-map','1:v','-c:a','copy','-c:v','mjpeg','-disposition:v','attached_pic');
       } else {
         coverArgs.push('-i',coverTmpPath,'-map','0:a','-c:a','copy');
       }
@@ -144,7 +233,8 @@ ipcMain.handle('pick-cover', async () => {
   });
   if (!r.filePaths.length) return null;
   const data = fs.readFileSync(r.filePaths[0]);
-  const mime = path.extname(r.filePaths[0]).toLowerCase()==='.png' ? 'image/png' : 'image/jpeg';
+  const ext = path.extname(r.filePaths[0]).toLowerCase();
+  const mime = ext === '.png' ? 'image/png' : (ext === '.webp' ? 'image/webp' : 'image/jpeg');
   return { base64: data.toString('base64'), mime };
 });
 

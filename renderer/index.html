@@ -628,11 +628,15 @@ function populateSingleEditor(index) {
   setVal('f-track', t.trackNumber||'');
   setVal('f-total', t.trackTotal||'');
   ['f-title','f-artist','f-album','f-genre','f-year','f-track','f-total'].forEach(id => document.getElementById(id).classList.remove('mixed'));
-
   if (t.coverBase64) {
-    document.getElementById('art-img').src = `data:${t.coverMime};base64,${t.coverBase64}`;
-    document.getElementById('art-img').style.display = 'block';
-    document.getElementById('art-placeholder').style.display = 'none';
+    const artImg = document.getElementById('art-img');
+    const artPh = document.getElementById('art-placeholder');
+    setImageWithFallback(artImg, t.coverBase64, t.coverMime, () => {
+      artImg.style.display = 'none';
+      artPh.style.display = 'flex';
+    });
+    artImg.style.display = 'block';
+    artPh.style.display = 'none';
   } else {
     document.getElementById('art-img').style.display = 'none';
     document.getElementById('art-placeholder').style.display = 'flex';
@@ -660,7 +664,10 @@ function populateBulkEditor() {
   const bulkImg = document.getElementById('bulk-art-img');
   const bulkPh  = document.getElementById('bulk-art-ph');
   if (sharedCover && firstCover) {
-    bulkImg.src = `data:${sel[0].tags.coverMime};base64,${firstCover}`;
+    setImageWithFallback(bulkImg, firstCover, sel[0].tags.coverMime, () => {
+      bulkImg.style.display='none';
+      bulkPh.style.display='flex';
+    });
     bulkImg.style.display='block'; bulkPh.style.display='none';
     document.getElementById('bulk-art-desc').textContent = 'All selected files share this artwork.';
   } else {
@@ -880,7 +887,7 @@ function loadThumb(i, url) {
   const el = document.getElementById('rthumb-'+i); if (!el) return;
   window.tagAPI.fetchUrl(url).then(r => {
     if (r && r.ok && r.base64) {
-      el.innerHTML = `<img src="data:${r.mime};base64,${r.base64}" alt=""/>`;
+      el.innerHTML = `<img src="${buildImageDataUrl(r.base64, r.mime)}" alt=""/>`;
     }
   }).catch(()=>{});
 }
@@ -1105,6 +1112,58 @@ function setVal(id,v){ const el=document.getElementById(id); if(el) el.value=v; 
 function clone(o) { return JSON.parse(JSON.stringify(o)); }
 function fmtDur(s) { const m=Math.floor(s/60); return `${m}:${Math.floor(s%60).toString().padStart(2,'0')}`; }
 function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function normalizeImageMime(mime) {
+  const s = String(mime || '').trim().toLowerCase().split(';')[0].trim();
+  if (!s) return '';
+  if (s === 'jpg' || s === 'jpeg' || s === 'image/jpg' || s === 'image/jpeg') return 'image/jpeg';
+  if (s === 'png' || s === 'image/png') return 'image/png';
+  if (s === 'webp' || s === 'image/webp') return 'image/webp';
+  if (s === 'gif' || s === 'image/gif') return 'image/gif';
+  return s.startsWith('image/') ? s : '';
+}
+
+function guessMimeFromBase64(base64) {
+  const sig = String(base64 || '').slice(0, 32);
+  if (sig.startsWith('/9j/')) return 'image/jpeg';
+  if (sig.startsWith('iVBOR')) return 'image/png';
+  if (sig.startsWith('R0lGOD')) return 'image/gif';
+  if (sig.startsWith('UklGR')) return 'image/webp';
+  return 'image/jpeg';
+}
+
+function buildImageDataUrl(base64, mimeHint) {
+  const mime = normalizeImageMime(mimeHint) || guessMimeFromBase64(base64);
+  return `data:${mime};base64,${base64}`;
+}
+
+function setImageWithFallback(imgEl, base64, mimeHint, onFail) {
+  const tried = new Set();
+  const candidates = [
+    normalizeImageMime(mimeHint),
+    guessMimeFromBase64(base64),
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'image/gif',
+  ].filter(Boolean);
+
+  let idx = 0;
+  const tryNext = () => {
+    while (idx < candidates.length && tried.has(candidates[idx])) idx++;
+    if (idx >= candidates.length) {
+      imgEl.onerror = null;
+      if (onFail) onFail();
+      return;
+    }
+    const mime = candidates[idx++];
+    tried.add(mime);
+    imgEl.src = `data:${mime};base64,${base64}`;
+  };
+
+  imgEl.onerror = tryNext;
+  tryNext();
+}
 
 let toastTimer;
 function showToast(msg, type='') {
