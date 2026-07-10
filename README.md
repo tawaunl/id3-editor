@@ -18,6 +18,13 @@ A lightweight Mac desktop app for editing ID3 and metadata tags on audio files.
 - Track number and total tracks
 - Album artwork (JPEG/PNG)
 
+## Metadata Lookup Sources
+
+- MusicBrainz (no API key required)
+- iTunes Search API (no API key required)
+- Discogs (requires personal access token)
+- Last.fm (requires API key)
+
 ## Setup
 
 ### 1. Install Node.js
