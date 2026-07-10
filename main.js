@@ -36,6 +36,29 @@ function getFfmpegPath() {
   return 'ffmpeg';
 }
 
+function isMp3File(filePath) {
+  return path.extname(filePath).toLowerCase() === '.mp3';
+}
+
+function collectMp3FilesFromDir(dirPath, out = []) {
+  let entries = [];
+  try {
+    entries = fs.readdirSync(dirPath, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+
+  for (const entry of entries) {
+    const fullPath = path.join(dirPath, entry.name);
+    if (entry.isDirectory()) {
+      collectMp3FilesFromDir(fullPath, out);
+    } else if (entry.isFile() && isMp3File(fullPath)) {
+      out.push(fullPath);
+    }
+  }
+  return out;
+}
+
 function guessImageMime(buf) {
   if (!buf || buf.length < 12) return 'image/jpeg';
   if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
@@ -129,10 +152,25 @@ function extractCoverFromMetadata(md) {
 // ── open files dialog ──────────────────────────────────────────────────────
 ipcMain.handle('open-files', async () => {
   const r = await dialog.showOpenDialog(mainWindow, {
-    properties: ['openFile','multiSelections'],
+    properties: ['openFile','openDirectory','multiSelections'],
     filters: [{ name:'Audio Files', extensions:['mp3','flac','aac','m4a','wav','aiff','aif'] }],
   });
-  return r.filePaths;
+
+  const out = [];
+  for (const selectedPath of r.filePaths || []) {
+    try {
+      const stat = fs.statSync(selectedPath);
+      if (stat.isDirectory()) {
+        collectMp3FilesFromDir(selectedPath, out);
+      } else if (stat.isFile() && isMp3File(selectedPath)) {
+        out.push(selectedPath);
+      }
+    } catch {
+      // Ignore paths that disappear or cannot be read.
+    }
+  }
+
+  return [...new Set(out)].sort((a, b) => a.localeCompare(b));
 });
 
 // ── read tags ──────────────────────────────────────────────────────────────
