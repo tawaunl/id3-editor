@@ -1318,12 +1318,33 @@ async function loadThumbBatch(results, requestId) {
   await Promise.all(Array.from({ length: concurrency }, () => worker()));
 }
 
+function mergeLookupTitleWithCurrentTitle(lookupTitle, currentTitle) {
+  const nextTitle = String(lookupTitle || '').trim();
+  const originalTitle = String(currentTitle || '').trim();
+  if (!nextTitle || !originalTitle) return nextTitle || originalTitle;
+
+  const djTermPattern = /\b(intro|clean|dirty|extended|acapella|instrumental|radio|main|club|mix|edit|remix|version|quick hit|transition|re-?drum|hook first|short edit|super clean|explicit)\b/i;
+  const suffixPattern = /(\s*(?:\([^)]*\)|\[[^\]]*\]|-\s*[^\-()\[\]]+))+\s*$/;
+  const suffixMatch = originalTitle.match(suffixPattern);
+  if (!suffixMatch) return nextTitle;
+
+  const suffixText = suffixMatch[0].trim();
+  if (!djTermPattern.test(suffixText)) return nextTitle;
+  if (nextTitle.toLowerCase().includes(suffixText.toLowerCase())) return nextTitle;
+
+  return `${nextTitle} ${suffixText}`.replace(/\s{2,}/g, ' ').trim();
+}
+
 function applyResult(i) {
   const r   = window._lookupResults[i];
   const idx = primaryIndex; if (idx < 0) return;
   const f   = files[idx];
 
-  if (r.title)  { setVal('f-title',  r.title);  f.tags.title  = r.title; }
+  if (r.title)  {
+    const mergedTitle = mergeLookupTitleWithCurrentTitle(r.title, getVal('f-title') || f.tags.title);
+    setVal('f-title',  mergedTitle);
+    f.tags.title  = mergedTitle;
+  }
   if (r.artist) { setVal('f-artist', r.artist); f.tags.artist = r.artist; }
   if (r.album)  { setVal('f-album',  r.album);  f.tags.album  = r.album; }
   if (r.genre)  { setVal('f-genre',  r.genre);  f.tags.genre  = r.genre; }
