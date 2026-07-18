@@ -5,6 +5,7 @@ const os   = require('os');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
 const execFileAsync = promisify(execFile);
+const RELEASES_API_URL = 'https://api.github.com/repos/tawaunl/id3-editor/releases/latest';
 
 let mainWindow;
 
@@ -147,6 +148,58 @@ function extractCoverFromMetadata(md) {
   }
 
   return { coverBase64: null, coverMime: null };
+}
+
+function parseVersion(v) {
+  return String(v || '')
+    .trim()
+    .replace(/^v/i, '')
+    .split('.')
+    .map((part) => Number.parseInt(part, 10) || 0);
+}
+
+function isVersionGreater(a, b) {
+  const av = parseVersion(a);
+  const bv = parseVersion(b);
+  const len = Math.max(av.length, bv.length);
+  for (let i = 0; i < len; i++) {
+    const ai = av[i] || 0;
+    const bi = bv[i] || 0;
+    if (ai > bi) return true;
+    if (ai < bi) return false;
+  }
+  return false;
+}
+
+function fetchLatestRelease() {
+  return new Promise((resolve, reject) => {
+    const https = require('https');
+    const req = https.get(RELEASES_API_URL, {
+      headers: {
+        'User-Agent': 'TagEditor/1.0 (update-check)',
+        Accept: 'application/vnd.github+json',
+      },
+    }, (res) => {
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => {
+        const body = Buffer.concat(chunks).toString('utf8');
+        if (res.statusCode && res.statusCode >= 400) {
+          return reject(new Error(`Update check failed (${res.statusCode})`));
+        }
+        try {
+          resolve(JSON.parse(body));
+        } catch {
+          reject(new Error('Update check returned invalid JSON'));
+        }
+      });
+    });
+    req.on('error', (err) => reject(err));
+    req.setTimeout(10000, () => {
+      req.destroy();
+      reject(new Error('Update check timed out'));
+    });
+  });
 }
 
 // ── open files dialog ──────────────────────────────────────────────────────
@@ -299,6 +352,38 @@ ipcMain.handle('fetch-url', async (_e, url, headers={}) => {
       req.setTimeout(10000, () => { req.destroy(); reject(new Error('timeout')); });
     });
   } catch(err) { return { ok: false, error: err.message }; }
+});
+
+ipcMain.handle('check-for-updates', async () => {
+  try {
+    const release = await fetchLatestRelease();
+    const latestVersion = String(release.tag_name || release.name || '').replace(/^v/i, '');
+    if (!latestVersion) return { error: 'No release version found.' };
+
+    const currentVersion = app.getVersion();
+    const updateAvailable = isVersionGreater(latestVersion, currentVersion);
+
+    return {
+      success: true,
+      currentVersion,
+      latestVersion,
+      updateAvailable,
+      releaseUrl: release.html_url || 'https://github.com/tawaunl/id3-editor/releases/latest',
+      releaseName: release.name || `v${latestVersion}`,
+      publishedAt: release.published_at || '',
+    };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+ipcMain.handle('open-external-url', async (_e, url) => {
+  try {
+    await shell.openExternal(String(url || ''));
+    return { success: true };
+  } catch (err) {
+    return { error: err.message };
+  }
 });
 
 // ── save settings ──────────────────────────────────────────────────────────

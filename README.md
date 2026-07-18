@@ -68,6 +68,8 @@ npm start
 - Click the album art area (or the Change button) to replace artwork.
 - Press **Cmd+S** or click **Save Tags** to write changes back to the file.
 - Optional: enable **Auto-rename on save** in Settings to rename files using the rename template after saving tags.
+- Use **Settings > Updates** to check for new releases manually.
+- Optional: enable **Auto-check on launch** in Settings to check for updates automatically at startup.
 - The dot indicator on a file name means you have unsaved changes.
 - Click **Revert** to discard changes and reload the original tags.
 

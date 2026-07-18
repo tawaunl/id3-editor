@@ -137,6 +137,11 @@ input[type=text].mixed{border-color:var(--warn);color:var(--warn)}
 #rename-template{flex:1;padding:6px 10px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:12px;font-family:inherit;outline:none;user-select:text}
 #rename-template:focus{border-color:var(--accent)}
 #rename-preview{font-size:11px;color:var(--text-muted);padding:4px 10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1.2}
+#rename-preview.changed{color:var(--accent);border-color:var(--accent);background:var(--accent-glow)}
+#rename-current{font-size:11px;color:var(--text-dim);padding:4px 10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1.2}
+#rename-status{font-size:11px;color:var(--text-muted)}
+#rename-status.ok{color:var(--success)}
+#rename-status.pending{color:var(--warn)}
 .token-chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
 .token-chip{padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:var(--surface3);border:1px solid var(--border);color:var(--text-dim);cursor:pointer;transition:background .1s}
 .token-chip:hover{background:var(--accent-glow);border-color:var(--accent);color:var(--accent)}
@@ -300,6 +305,19 @@ input[type=text].mixed{border-color:var(--warn);color:var(--warn)}
         </div>
         <div class="setting-desc" style="padding:0">Available tokens: {artist} {album} {title} {track} {year} {genre}</div>
       </div>
+      <div class="settings-section">
+        <h3>Updates</h3>
+        <div class="setting-row">
+          <div><div class="setting-label">Auto-check on launch</div><div class="setting-desc">Checks GitHub releases when the app starts</div></div>
+          <button class="toggle" id="toggle-auto-update-check" onclick="toggleSetting('autoCheckForUpdates')"></button>
+        </div>
+        <div class="setting-row">
+          <div><div class="setting-label">Check for updates now</div><div class="setting-desc">Compares your version with the latest release</div></div>
+          <button class="btn btn-secondary btn-sm" id="check-updates-btn" onclick="checkForUpdates(false)">Check now</button>
+        </div>
+        <div id="update-status" class="setting-desc" style="padding:0">Not checked yet.</div>
+        <button class="btn btn-secondary btn-sm" id="open-update-btn" style="margin-top:10px;display:none" onclick="openUpdateRelease()">Open latest release</button>
+      </div>
     </div>
 
     <!-- Empty state -->
@@ -375,9 +393,14 @@ input[type=text].mixed{border-color:var(--warn);color:var(--warn)}
             <div style="display:flex;gap:8px;align-items:center">
               <label style="white-space:nowrap;font-size:11px">Rename template</label>
               <input id="rename-template" type="text" placeholder="{track} - {title}" oninput="updateRenamePreview()"/>
-              <button class="btn btn-secondary btn-sm" onclick="applyRename()">Rename</button>
+              <button class="btn btn-secondary btn-sm" id="rename-btn" onclick="applyRename()">Rename</button>
             </div>
             <div class="token-chips" id="token-chips"></div>
+            <div id="rename-status">No rename needed</div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <span style="font-size:10px;color:var(--text-muted);white-space:nowrap">Current:</span>
+              <div id="rename-current">—</div>
+            </div>
             <div style="display:flex;align-items:center;gap:6px">
               <span style="font-size:10px;color:var(--text-muted);white-space:nowrap">Preview:</span>
               <div id="rename-preview">—</div>
@@ -446,11 +469,14 @@ let autoSaveTimer    = null;
 let fileSearchQuery  = '';
 let fileSortKey      = 'title';
 let fileSortDir      = 'asc';
+let updateCheckInProgress = false;
+let latestReleaseUrl = '';
 
 const settings = {
   autoSaveOnChange:  false,
   autoSaveOnSwitch:  false,
   autoRenameOnSave:  false,
+  autoCheckForUpdates: true,
   useMusicBrainz:    true,
   useITunes:         true,
   useDiscogs:        false,
@@ -470,6 +496,9 @@ const TOKENS = ['{artist}','{album}','{title}','{track}','{year}','{genre}'];
   Object.assign(settings, saved);
   applySettingsToUI();
   buildTokenChips();
+  if (settings.autoCheckForUpdates) {
+    checkForUpdates(true);
+  }
 })();
 
 function buildTokenChips() {
@@ -496,6 +525,7 @@ function applySettingsToUI() {
   setToggle('toggle-autosave-change', settings.autoSaveOnChange);
   setToggle('toggle-autosave-switch', settings.autoSaveOnSwitch);
   setToggle('toggle-auto-rename-save', settings.autoRenameOnSave);
+  setToggle('toggle-auto-update-check', settings.autoCheckForUpdates);
   setToggle('toggle-mb',      settings.useMusicBrainz);
   setToggle('toggle-itunes',  settings.useITunes !== false);
   setToggle('toggle-discogs', settings.useDiscogs);
@@ -516,6 +546,9 @@ function toggleSetting(key) {
   settings[key] = !settings[key];
   applySettingsToUI();
   persistSettings();
+  if (key === 'autoCheckForUpdates' && settings.autoCheckForUpdates) {
+    checkForUpdates(true);
+  }
 }
 
 function onSettingInput() {
@@ -527,6 +560,60 @@ function onSettingInput() {
 
 async function persistSettings() {
   await window.tagAPI.saveSettings(settings);
+}
+
+async function checkForUpdates(isAutomatic = false) {
+  if (updateCheckInProgress) return;
+
+  const statusEl = document.getElementById('update-status');
+  const openBtn = document.getElementById('open-update-btn');
+  const checkBtn = document.getElementById('check-updates-btn');
+  updateCheckInProgress = true;
+  latestReleaseUrl = '';
+  openBtn.style.display = 'none';
+  checkBtn.disabled = true;
+  statusEl.textContent = 'Checking for updates...';
+
+  const result = await window.tagAPI.checkForUpdates();
+
+  if (result && result.error) {
+    statusEl.textContent = `Update check failed: ${result.error}`;
+    if (!isAutomatic) {
+      showToast(`Update check failed: ${result.error}`, 'error');
+    }
+  } else if (result && result.success) {
+    if (result.updateAvailable) {
+      latestReleaseUrl = result.releaseUrl || '';
+      statusEl.textContent = `Update available: v${result.latestVersion} (current: v${result.currentVersion})`;
+      if (latestReleaseUrl) {
+        openBtn.style.display = 'inline-block';
+      }
+      if (isAutomatic) {
+        showToast(`Update available: v${result.latestVersion}`, 'warn');
+      }
+    } else {
+      statusEl.textContent = `You are up to date (v${result.currentVersion}).`;
+      if (!isAutomatic) {
+        showToast('You are up to date', 'success');
+      }
+    }
+  } else {
+    statusEl.textContent = 'Update check did not return a valid response.';
+    if (!isAutomatic) {
+      showToast('Update check failed', 'error');
+    }
+  }
+
+  checkBtn.disabled = false;
+  updateCheckInProgress = false;
+}
+
+async function openUpdateRelease() {
+  if (!latestReleaseUrl) return;
+  const result = await window.tagAPI.openExternalUrl(latestReleaseUrl);
+  if (result && result.error) {
+    showToast(`Could not open release: ${result.error}`, 'error');
+  }
 }
 
 function toggleSettings() {
@@ -1071,7 +1158,6 @@ function applyResult(i) {
   f.dirty = true;
   renderFileList(); updateToolbar(); updateRenamePreview();
   showToast('Tags applied from '+r.source, 'success');
-  document.getElementById('lookup-results').style.display='none';
 
   if (settings.autoSaveOnChange) {
     clearTimeout(autoSaveTimer);
@@ -1185,6 +1271,7 @@ function sanitize(s) { return s.replace(/[/\\:*?"<>|]/g,'_').trim(); }
 function updateRenamePreview() {
   if (primaryIndex < 0) return;
   const f    = files[primaryIndex];
+  document.getElementById('rename-current').textContent = f.name || '—';
   const tags = {
     ...f.tags,
     title:       getVal('f-title'),
@@ -1196,7 +1283,18 @@ function updateRenamePreview() {
   };
   const tpl  = document.getElementById('rename-template').value || settings.renameTemplate || '{track} - {title}';
   const name = buildName(tpl, tags, f.name);
-  document.getElementById('rename-preview').textContent = name;
+  const previewEl = document.getElementById('rename-preview');
+  const renameBtn = document.getElementById('rename-btn');
+  const statusEl = document.getElementById('rename-status');
+  const needsRename = name !== f.name;
+  previewEl.textContent = name;
+  previewEl.classList.toggle('changed', needsRename);
+  if (renameBtn) renameBtn.disabled = !needsRename;
+  if (statusEl) {
+    statusEl.classList.toggle('ok', !needsRename);
+    statusEl.classList.toggle('pending', needsRename);
+    statusEl.textContent = needsRename ? 'Rename needed' : 'No rename needed';
+  }
 }
 
 async function applyRename() {
@@ -1214,6 +1312,10 @@ async function applyRename() {
   };
   const ext  = f.name.match(/(\.[^.]+)$/)?.[1]||'';
   const base = buildName(tpl, tags, f.name).replace(/\.[^.]+$/,'');
+  if ((base + ext) === f.name) {
+    showToast('No rename needed', 'success');
+    return;
+  }
   const r    = await window.tagAPI.renameFile(f.path, base);
   if (r.error) { showToast('Rename failed: '+r.error, 'error'); return; }
   f.path = r.newPath;
