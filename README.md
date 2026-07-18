@@ -84,6 +84,26 @@ npm run build:mac:intel
 npm run build:mac:apple-silicon
 ```
 
+## Code signing and notarization (macOS)
+
+The build is configured to notarize automatically after signing when these env vars are present:
+
+```bash
+export APPLE_ID="your-apple-id@example.com"
+export APPLE_APP_SPECIFIC_PASSWORD="xxxx-xxxx-xxxx-xxxx"
+export APPLE_TEAM_ID="YOURTEAMID"
+```
+
+You also need a `Developer ID Application` certificate installed in your keychain.
+
+Then run:
+
+```bash
+npm run build
+```
+
+If the Apple env vars are not set, notarization is skipped and unsigned DMGs are still produced.
+
 ## Change the app icon (macOS)
 
 1. Add your icon image as `assets/icon-source.png` at 1024x1024 pixels.
