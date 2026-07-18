@@ -72,7 +72,17 @@ npm start
 npm run build
 ```
 
-This produces a `.dmg` in the `dist/` folder you can distribute or install.
+This now produces both Intel (`x64`) and Apple Silicon (`arm64`) `.dmg` files in the `dist/` folder.
+
+Architecture-specific builds:
+
+```bash
+# Intel Mac
+npm run build:mac:intel
+
+# Apple Silicon Mac
+npm run build:mac:apple-silicon
+```
 
 ## Change the app icon (macOS)
 

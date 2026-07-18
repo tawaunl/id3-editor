@@ -5,8 +5,10 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder --mac",
-    "build:mac": "electron-builder --mac",
+    "build": "electron-builder --mac --x64 --arm64",
+    "build:mac": "electron-builder --mac --x64 --arm64",
+    "build:mac:intel": "electron-builder --mac --x64",
+    "build:mac:apple-silicon": "electron-builder --mac --arm64",
     "icon:mac": "bash scripts/generate-mac-icon.sh"
   },
   "dependencies": {
@@ -23,7 +25,15 @@
     "productName": "TagEditor",
     "mac": {
       "category": "public.app-category.music",
-      "target": "dmg",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
       "icon": "assets/icon.icns"
     },
     "dmg": {
