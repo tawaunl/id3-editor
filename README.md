@@ -59,6 +59,7 @@ npm start
 ## Usage
 
 - Click **Open Files** in the sidebar, or drag and drop audio files onto the window.
+- Use the left table (Title, Artist, Album, Genre) to sort columns and search quickly.
 - Select a file from the sidebar to load its tags into the editor.
 - Edit any fields on the right.
 - Select multiple files (Cmd/Ctrl-click or Shift-click) to enter **Bulk Edit** mode.

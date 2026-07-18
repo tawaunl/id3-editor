@@ -17,7 +17,7 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text'
 #app{display:flex;height:100vh}
 
 /* ── Sidebar ── */
-#sidebar{width:240px;min-width:180px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;padding-top:48px;-webkit-app-region:drag}
+#sidebar{width:420px;min-width:320px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;padding-top:48px;-webkit-app-region:drag}
 #sidebar-header{padding:12px 12px 8px;-webkit-app-region:no-drag;display:flex;flex-direction:column;gap:6px}
 #sidebar-top-row{display:flex;align-items:center;justify-content:space-between}
 #sidebar-title{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted)}
@@ -27,20 +27,28 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text'
 .icon-btn.active{background:var(--accent-glow);border-color:var(--accent);color:var(--accent)}
 #open-btn{width:100%;padding:7px 10px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;transition:background .15s;-webkit-app-region:no-drag}
 #open-btn:hover{background:var(--surface3)}
-#file-list{flex:1;overflow-y:auto;padding:8px;-webkit-app-region:no-drag}
+#sidebar-search-wrap{-webkit-app-region:no-drag;padding:0 12px 8px}
+#file-search{width:100%;padding:7px 10px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:12px;font-family:inherit;outline:none;user-select:text}
+#file-search:focus{border-color:var(--accent)}
+#file-search::placeholder{color:var(--text-muted)}
+#file-table-head{display:grid;grid-template-columns:1.4fr 1fr 1fr .9fr;gap:6px;padding:0 12px 6px;-webkit-app-region:no-drag}
+.col-head{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted);background:transparent;border:none;text-align:left;cursor:pointer;padding:5px 7px;border-radius:var(--radius-sm);display:flex;align-items:center;gap:4px}
+.col-head:hover{background:var(--surface2);color:var(--text-dim)}
+.col-head .sort-mark{font-size:10px;color:var(--accent);min-width:8px}
+#file-list{flex:1;overflow-y:auto;padding:0 8px 8px;-webkit-app-region:no-drag}
 #file-list::-webkit-scrollbar{width:4px}
 #file-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
-.file-item{padding:8px 10px;border-radius:var(--radius-sm);cursor:pointer;display:flex;flex-direction:column;gap:2px;transition:background .1s;position:relative}
-.file-item:hover{background:var(--surface2)}
-.file-item.selected{background:rgba(99,102,241,.2)}
-.file-item.primary{background:var(--accent)}
-.file-item.primary .file-name{color:#fff}
-.file-item.primary .file-meta{color:rgba(255,255,255,.6)}
-.file-item.dirty::after{content:'';position:absolute;right:9px;top:50%;transform:translateY(-50%);width:6px;height:6px;border-radius:50%;background:var(--accent)}
-.file-item.primary.dirty::after{background:rgba(255,255,255,.75)}
-.file-item.selected.dirty::after{background:var(--accent)}
-.file-name{font-size:12px;font-weight:500;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.file-meta{font-size:10px;color:var(--text-muted)}
+.file-row{display:grid;grid-template-columns:1.4fr 1fr 1fr .9fr;gap:6px;align-items:center;padding:6px 6px;border-radius:var(--radius-sm);cursor:pointer;transition:background .1s;position:relative}
+.file-row:hover{background:var(--surface2)}
+.file-row.selected{background:rgba(99,102,241,.2)}
+.file-row.primary{background:var(--accent)}
+.file-row.primary .cell{color:#fff}
+.file-row.primary .cell-muted{color:rgba(255,255,255,.7)}
+.file-row.dirty .cell-title::after{content:'•';margin-left:6px;color:var(--accent);font-size:12px;vertical-align:middle}
+.file-row.primary.dirty .cell-title::after{color:rgba(255,255,255,.85)}
+.cell{font-size:11px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cell-title{font-weight:600}
+.cell-muted{color:var(--text-muted)}
 #empty-sidebar{padding:20px 14px;color:var(--text-muted);font-size:12px;line-height:1.6}
 #sel-hint{padding:8px 16px;font-size:11px;color:var(--text-muted);border-top:1px solid var(--border);-webkit-app-region:no-drag;display:none}
 
@@ -201,6 +209,15 @@ input[type=text].mixed{border-color:var(--warn);color:var(--warn)}
       <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 3h5l2 2h5v9H2V3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" fill="none"/></svg>
       Open Files
     </button>
+  </div>
+  <div id="sidebar-search-wrap">
+    <input id="file-search" type="text" placeholder="Search title, artist, album, genre..." oninput="onFileFilterInput()"/>
+  </div>
+  <div id="file-table-head">
+    <button class="col-head" onclick="setFileSort('title')">Title <span id="sort-title" class="sort-mark"></span></button>
+    <button class="col-head" onclick="setFileSort('artist')">Artist <span id="sort-artist" class="sort-mark"></span></button>
+    <button class="col-head" onclick="setFileSort('album')">Album <span id="sort-album" class="sort-mark"></span></button>
+    <button class="col-head" onclick="setFileSort('genre')">Genre <span id="sort-genre" class="sort-mark"></span></button>
   </div>
   <div id="file-list"><div id="empty-sidebar">Drop files here or click Open Files.</div></div>
   <div id="sel-hint"></div>
@@ -419,6 +436,9 @@ let primaryIndex     = -1;
 let lastClickIndex   = -1;
 let bulkArtPending   = null;
 let autoSaveTimer    = null;
+let fileSearchQuery  = '';
+let fileSortKey      = 'title';
+let fileSortDir      = 'asc';
 
 const settings = {
   autoSaveOnChange:  false,
@@ -548,7 +568,70 @@ async function addFiles(paths) {
     files.push({ path:p, name, tags, originalTags: clone(tags), dirty:false });
   }
   renderFileList();
-  if (primaryIndex === -1 && files.length > 0) handleClick(0,false,false);
+  if (primaryIndex === -1 && files.length > 0) {
+    const visible = getVisibleFileIndices();
+    if (visible.length > 0) handleClick(visible[0], false, false);
+  }
+}
+
+function getFileColumnValue(file, key) {
+  const tags = file.tags || {};
+  if (key === 'title') return tags.title || file.name.replace(/\.[^.]+$/, '');
+  if (key === 'artist') return tags.artist || '';
+  if (key === 'album') return tags.album || '';
+  if (key === 'genre') return tags.genre || '';
+  if (key === 'name') return file.name || '';
+  return '';
+}
+
+function getVisibleFileIndices() {
+  const query = fileSearchQuery.trim().toLowerCase();
+  const indices = files.map((_, i) => i).filter((i) => {
+    if (!query) return true;
+    const f = files[i];
+    const text = [
+      f.name,
+      getFileColumnValue(f, 'title'),
+      getFileColumnValue(f, 'artist'),
+      getFileColumnValue(f, 'album'),
+      getFileColumnValue(f, 'genre'),
+    ].join(' ').toLowerCase();
+    return text.includes(query);
+  });
+
+  indices.sort((a, b) => {
+    const av = getFileColumnValue(files[a], fileSortKey);
+    const bv = getFileColumnValue(files[b], fileSortKey);
+    const cmp = String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: 'base' });
+    if (cmp !== 0) return fileSortDir === 'asc' ? cmp : -cmp;
+    return files[a].name.localeCompare(files[b].name, undefined, { numeric: true, sensitivity: 'base' });
+  });
+
+  return indices;
+}
+
+function onFileFilterInput() {
+  fileSearchQuery = getVal('file-search');
+  renderFileList();
+}
+
+function setFileSort(key) {
+  if (fileSortKey === key) {
+    fileSortDir = fileSortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    fileSortKey = key;
+    fileSortDir = 'asc';
+  }
+  renderFileList();
+}
+
+function updateSortIndicators() {
+  const keys = ['title', 'artist', 'album', 'genre'];
+  for (const key of keys) {
+    const el = document.getElementById(`sort-${key}`);
+    if (!el) continue;
+    el.textContent = fileSortKey === key ? (fileSortDir === 'asc' ? '↑' : '↓') : '';
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -591,23 +674,35 @@ function handleClick(index, shiftKey, metaKey) {
 // ═══════════════════════════════════════════════════════════════════════════
 function renderFileList() {
   const list = document.getElementById('file-list');
+  updateSortIndicators();
+
   if (!files.length) {
     list.innerHTML = '<div id="empty-sidebar">Drop files here or click Open Files.</div>';
     document.getElementById('sel-hint').style.display = 'none';
     return;
   }
-  list.innerHTML = files.map((f,i) => {
+
+  const visible = getVisibleFileIndices();
+  if (!visible.length) {
+    list.innerHTML = '<div id="empty-sidebar">No files match your search.</div>';
+  } else {
+    list.innerHTML = visible.map((i) => {
+    const f = files[i];
     const isPrimary  = i === primaryIndex;
     const isSelected = selectedIndices.has(i) && !isPrimary;
-    const cls = ['file-item', isPrimary?'primary':'', isSelected?'selected':'', f.dirty?'dirty':''].filter(Boolean).join(' ');
+    const cls = ['file-row', isPrimary?'primary':'', isSelected?'selected':'', f.dirty?'dirty':''].filter(Boolean).join(' ');
     return `<div class="${cls}" onclick="handleClick(${i},event.shiftKey,event.metaKey||event.ctrlKey)">
-      <div class="file-name">${escHtml(f.name)}</div>
-      <div class="file-meta">${escHtml(f.tags.format||'')}${f.tags.duration?' · '+fmtDur(f.tags.duration):''}</div>
+      <div class="cell cell-title">${escHtml(getFileColumnValue(f, 'title') || '—')}</div>
+      <div class="cell">${escHtml(getFileColumnValue(f, 'artist') || '—')}</div>
+      <div class="cell">${escHtml(getFileColumnValue(f, 'album') || '—')}</div>
+      <div class="cell cell-muted">${escHtml(getFileColumnValue(f, 'genre') || '—')}</div>
     </div>`;
   }).join('');
+  }
 
   const hint = document.getElementById('sel-hint');
-  if (selectedIndices.size > 1) { hint.style.display = 'block'; hint.textContent = `${selectedIndices.size} files selected`; }
+  if (selectedIndices.size > 1) { hint.style.display = 'block'; hint.textContent = `${selectedIndices.size} files selected · ${visible.length} visible`; }
+  else if (fileSearchQuery.trim()) { hint.style.display = 'block'; hint.textContent = `${visible.length} visible`; }
   else hint.style.display = 'none';
 }
 
@@ -1117,9 +1212,12 @@ document.addEventListener('keydown', e => {
     const focused = document.activeElement;
     if (focused && (focused.tagName==='INPUT'||focused.tagName==='TEXTAREA')) return;
     e.preventDefault();
+    const visible = getVisibleFileIndices();
+    if (!visible.length) return;
     const dir = e.key==='ArrowDown'?1:-1;
-    const next = Math.max(0, Math.min(files.length-1, (primaryIndex<0?0:primaryIndex)+dir));
-    handleClick(next, e.shiftKey, false);
+    const pos = Math.max(0, visible.indexOf(primaryIndex));
+    const nextPos = Math.max(0, Math.min(visible.length - 1, pos + dir));
+    handleClick(visible[nextPos], e.shiftKey, false);
   }
 });
 
