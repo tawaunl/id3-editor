@@ -2,6 +2,11 @@
   "name": "id3-editor",
   "version": "1.0.1",
   "description": "ID3 tag editor for Mac",
+  "author": {
+    "name": "Tawaun Lucas",
+    "email": "tawaunl@gmail.com",
+    "url": "https://github.com/tawaunl"
+  },
   "main": "main.js",
   "scripts": {
     "start": "electron .",
