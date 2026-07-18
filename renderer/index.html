@@ -1239,21 +1239,40 @@ function hasLookupSourcesEnabled() {
   );
 }
 
+function rankLookupResults(results) {
+  return [...results].sort((a, b) => {
+    const aRank = (a.score || 0) + (a.coverUrl ? 12 : 0);
+    const bRank = (b.score || 0) + (b.coverUrl ? 12 : 0);
+    if (bRank !== aRank) return bRank - aRank;
+    if (!!b.coverUrl !== !!a.coverUrl) return b.coverUrl ? 1 : -1;
+    return (b.score || 0) - (a.score || 0);
+  });
+}
+
 async function gatherLookupResults(query) {
   if (!hasLookupSourcesEnabled()) return [];
 
   let results = [];
-  if (settings.useMusicBrainz) {
-    const musicBrainzResults = await searchMusicBrainz(query);
-    results = results.concat(musicBrainzResults);
-    if ((musicBrainzResults[0]?.score || 0) >= 95) {
-      return musicBrainzResults.sort((a,b) => (b.score||0)-(a.score||0));
-    }
+  let musicBrainzResults = [];
+  let iTunesResults = [];
+  let discogsResults = [];
+
+  const primaryPromises = [];
+  if (settings.useMusicBrainz) primaryPromises.push(searchMusicBrainz(query).then((value) => { musicBrainzResults = value; }));
+  if (settings.useITunes) primaryPromises.push(searchITunes(query).then((value) => { iTunesResults = value; }));
+  if (settings.useDiscogs && settings.discogsToken) primaryPromises.push(searchDiscogs(query).then((value) => { discogsResults = value; }));
+
+  if (primaryPromises.length) {
+    await Promise.allSettled(primaryPromises);
+  }
+
+  results = results.concat(musicBrainzResults, iTunesResults, discogsResults);
+
+  if ((musicBrainzResults[0]?.score || 0) >= 95) {
+    return rankLookupResults(results);
   }
 
   const fallbackPromises = [];
-  if (settings.useITunes) fallbackPromises.push(searchITunes(query));
-  if (settings.useDiscogs && settings.discogsToken) fallbackPromises.push(searchDiscogs(query));
   if (settings.useLastFm && settings.lastFmKey) fallbackPromises.push(searchLastFm(query));
 
   if (fallbackPromises.length) {
@@ -1263,7 +1282,7 @@ async function gatherLookupResults(query) {
     );
   }
 
-  return results.sort((a,b) => (b.score||0)-(a.score||0));
+  return rankLookupResults(results);
 }
 
 function renderLookupResults(results, requestId = activeLookupRequestId) {
