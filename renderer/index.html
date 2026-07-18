@@ -31,15 +31,15 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text'
 #file-search{width:100%;padding:7px 10px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:12px;font-family:inherit;outline:none;user-select:text}
 #file-search:focus{border-color:var(--accent)}
 #file-search::placeholder{color:var(--text-muted)}
-#file-list{flex:1;overflow-y:auto;padding:0 8px 8px;-webkit-app-region:no-drag}
-#file-list::-webkit-scrollbar{width:4px}
-#file-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
-#file-table-head{position:sticky;top:0;z-index:3;display:grid;grid-template-columns:1.4fr 1fr 1fr .9fr;gap:6px;padding:6px 4px 6px;background:linear-gradient(to bottom,var(--surface) 82%,rgba(30,30,32,.92) 100%);border-bottom:1px solid var(--border);-webkit-app-region:no-drag}
+#file-list{flex:1;display:flex;flex-direction:column;overflow:hidden;padding:0 8px 8px;-webkit-app-region:no-drag}
+#file-table-head{flex-shrink:0;position:sticky;top:0;z-index:3;display:grid;grid-template-columns:1.4fr 1fr 1fr .9fr;gap:6px;padding:6px 4px 6px;background:linear-gradient(to bottom,var(--surface) 82%,rgba(30,30,32,.92) 100%);border-bottom:1px solid var(--border);-webkit-app-region:no-drag}
 .col-head{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted);background:transparent;border:none;text-align:left;cursor:pointer;padding:5px 7px;border-radius:var(--radius-sm);display:flex;align-items:center;gap:4px}
 .col-head:hover{background:var(--surface2);color:var(--text-dim)}
 .col-head .sort-mark{font-size:10px;color:var(--accent);min-width:8px}
-#file-rows{padding-top:4px}
-.file-row{display:grid;grid-template-columns:1.4fr 1fr 1fr .9fr;gap:6px;align-items:center;padding:6px 6px;border-radius:var(--radius-sm);cursor:pointer;transition:background .1s;position:relative}
+#file-rows{flex:1;overflow-y:auto;position:relative;padding-top:4px}
+#file-rows::-webkit-scrollbar{width:4px}
+#file-rows::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.file-row{display:grid;grid-template-columns:1.4fr 1fr 1fr .9fr;gap:6px;align-items:center;height:34px;padding:6px 6px;border-radius:var(--radius-sm);cursor:pointer;transition:background .1s;position:relative}
 .file-row:hover{background:var(--surface2)}
 .file-row.selected{background:rgba(99,102,241,.2)}
 .file-row.primary{background:var(--accent)}
@@ -47,6 +47,8 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text'
 .file-row.primary .cell-muted{color:rgba(255,255,255,.7)}
 .file-row.dirty .cell-title::after{content:'•';margin-left:6px;color:var(--accent);font-size:12px;vertical-align:middle}
 .file-row.primary.dirty .cell-title::after{color:rgba(255,255,255,.85)}
+#file-rows-spacer{width:100%}
+#file-rows-viewport{display:flex;flex-direction:column}
 .cell{font-size:11px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cell-title{font-weight:600}
 .cell-muted{color:var(--text-muted)}
@@ -472,6 +474,13 @@ let fileSortDir      = 'asc';
 let updateCheckInProgress = false;
 let latestReleaseUrl = '';
 let lookupState = { filePath: '', query: '', status: '', results: [] };
+let settingsSaveTimer = null;
+let fileSearchTimer = null;
+let activeLookupRequestId = 0;
+let fileListRenderFrame = null;
+
+const FILE_ROW_HEIGHT = 34;
+const FILE_ROW_OVERSCAN = 8;
 
 const settings = {
   autoSaveOnChange:  false,
@@ -528,7 +537,7 @@ function applySettingsToUI() {
   setToggle('toggle-auto-rename-save', settings.autoRenameOnSave);
   setToggle('toggle-auto-update-check', settings.autoCheckForUpdates);
   setToggle('toggle-mb',      settings.useMusicBrainz);
-  setToggle('toggle-itunes',  settings.useITunes !== false);
+  setToggle('toggle-itunes',  settings.useITunes === true);
   setToggle('toggle-discogs', settings.useDiscogs);
   setToggle('toggle-lastfm',  settings.useLastFm);
   document.getElementById('input-discogs-token').value  = settings.discogsToken  || '';
@@ -559,7 +568,14 @@ function onSettingInput() {
   persistSettings();
 }
 
-async function persistSettings() {
+function persistSettings() {
+  clearTimeout(settingsSaveTimer);
+  settingsSaveTimer = setTimeout(() => flushSettings(), 200);
+}
+
+async function flushSettings() {
+  clearTimeout(settingsSaveTimer);
+  settingsSaveTimer = null;
   await window.tagAPI.saveSettings(settings);
 }
 
@@ -658,16 +674,59 @@ async function openFiles() {
 }
 
 async function addFiles(paths) {
-  for (const p of paths) {
-    if (files.find(f => f.path === p)) continue;
-    const tags = await window.tagAPI.readTags(p);
-    const name = p.split('/').pop();
-    files.push({ path:p, name, tags, originalTags: clone(tags), dirty:false });
+  const newPaths = paths.filter((p) => !files.find((f) => f.path === p));
+  if (!newPaths.length) return;
+
+  const pending = newPaths.map((path) => ({ path, name: path.split('/').pop() }));
+  const results = new Array(pending.length);
+  const concurrency = Math.min(4, pending.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < pending.length) {
+      const currentIndex = nextIndex++;
+      const entry = pending[currentIndex];
+      const tags = await window.tagAPI.readTags(entry.path, { skipCovers: true });
+      results[currentIndex] = {
+        path: entry.path,
+        name: entry.name,
+        tags,
+        originalTags: clone(tags),
+        dirty: false,
+      };
+    }
   }
+
+  await Promise.all(Array.from({ length: concurrency }, () => worker()));
+  files.push(...results.filter(Boolean));
   renderFileList();
   if (primaryIndex === -1 && files.length > 0) {
     const visible = getVisibleFileIndices();
     if (visible.length > 0) handleClick(visible[0], false, false);
+  }
+}
+
+async function ensureSelectedFileArtwork(index) {
+  const file = files[index];
+  if (!file || file.tags?.coverLoaded || file._coverLoadPending) return;
+
+  file._coverLoadPending = true;
+  const fullTags = await window.tagAPI.readTags(file.path, { skipCovers: false });
+  file._coverLoadPending = false;
+  if (!fullTags || fullTags.error) return;
+
+  file.tags.coverBase64 = fullTags.coverBase64;
+  file.tags.coverMime = fullTags.coverMime;
+  file.tags.coverLoaded = true;
+
+  if (!file.dirty) {
+    file.originalTags.coverBase64 = fullTags.coverBase64;
+    file.originalTags.coverMime = fullTags.coverMime;
+    file.originalTags.coverLoaded = true;
+  }
+
+  if (index === primaryIndex && selectedIndices.size === 1) {
+    populateSingleEditor(index);
   }
 }
 
@@ -708,8 +767,13 @@ function getVisibleFileIndices() {
 }
 
 function onFileFilterInput() {
-  fileSearchQuery = getVal('file-search');
-  renderFileList();
+  clearTimeout(fileSearchTimer);
+  fileSearchTimer = setTimeout(() => {
+    fileSearchQuery = getVal('file-search');
+    const fileRows = document.getElementById('file-rows');
+    if (fileRows) fileRows.scrollTop = 0;
+    renderFileList();
+  }, 100);
 }
 
 function setFileSort(key) {
@@ -719,7 +783,17 @@ function setFileSort(key) {
     fileSortKey = key;
     fileSortDir = 'asc';
   }
+  const fileRows = document.getElementById('file-rows');
+  if (fileRows) fileRows.scrollTop = 0;
   renderFileList();
+}
+
+function scheduleFileListRender() {
+  if (fileListRenderFrame) return;
+  fileListRenderFrame = requestAnimationFrame(() => {
+    fileListRenderFrame = null;
+    renderFileList();
+  });
 }
 
 function updateSortIndicators() {
@@ -790,18 +864,26 @@ function renderFileList() {
   if (!visible.length) {
     rows.innerHTML = '<div id="empty-sidebar">No files match your search.</div>';
   } else {
-    rows.innerHTML = visible.map((i) => {
-    const f = files[i];
-    const isPrimary  = i === primaryIndex;
-    const isSelected = selectedIndices.has(i) && !isPrimary;
-    const cls = ['file-row', isPrimary?'primary':'', isSelected?'selected':'', f.dirty?'dirty':''].filter(Boolean).join(' ');
-    return `<div class="${cls}" onclick="handleClick(${i},event.shiftKey,event.metaKey||event.ctrlKey)">
-      <div class="cell cell-title">${escHtml(getFileColumnValue(f, 'title') || '—')}</div>
-      <div class="cell">${escHtml(getFileColumnValue(f, 'artist') || '—')}</div>
-      <div class="cell">${escHtml(getFileColumnValue(f, 'album') || '—')}</div>
-      <div class="cell cell-muted">${escHtml(getFileColumnValue(f, 'genre') || '—')}</div>
-    </div>`;
-  }).join('');
+    const scrollTop = rows.scrollTop;
+    const viewportHeight = rows.clientHeight || FILE_ROW_HEIGHT;
+    const startIndex = Math.max(0, Math.floor(scrollTop / FILE_ROW_HEIGHT) - FILE_ROW_OVERSCAN);
+    const visibleCount = Math.max(1, Math.ceil(viewportHeight / FILE_ROW_HEIGHT) + (FILE_ROW_OVERSCAN * 2));
+    const endIndex = Math.min(visible.length, startIndex + visibleCount);
+    const topPad = startIndex * FILE_ROW_HEIGHT;
+    const bottomPad = Math.max(0, (visible.length - endIndex) * FILE_ROW_HEIGHT);
+
+    rows.innerHTML = `<div id="file-rows-spacer" style="padding-top:${topPad}px;padding-bottom:${bottomPad}px"><div id="file-rows-viewport">${visible.slice(startIndex, endIndex).map((i) => {
+      const f = files[i];
+      const isPrimary  = i === primaryIndex;
+      const isSelected = selectedIndices.has(i) && !isPrimary;
+      const cls = ['file-row', isPrimary?'primary':'', isSelected?'selected':'', f.dirty?'dirty':''].filter(Boolean).join(' ');
+      return `<div class="${cls}" data-file-index="${i}" onclick="handleClick(${i},event.shiftKey,event.metaKey||event.ctrlKey)">
+        <div class="cell cell-title">${escHtml(getFileColumnValue(f, 'title') || '—')}</div>
+        <div class="cell">${escHtml(getFileColumnValue(f, 'artist') || '—')}</div>
+        <div class="cell">${escHtml(getFileColumnValue(f, 'album') || '—')}</div>
+        <div class="cell cell-muted">${escHtml(getFileColumnValue(f, 'genre') || '—')}</div>
+      </div>`;
+    }).join('')}</div></div>`;
   }
 
   const hint = document.getElementById('sel-hint');
@@ -817,7 +899,7 @@ function renderEditor() {
   const count = selectedIndices.size;
   hide('empty-state'); hide('editor'); hide('bulk-editor');
   if (count === 0)      { show('empty-state'); }
-  else if (count === 1) { show('editor');      populateSingleEditor(primaryIndex); }
+  else if (count === 1) { show('editor');      populateSingleEditor(primaryIndex); ensureSelectedFileArtwork(primaryIndex); }
   else                  { show('bulk-editor'); populateBulkEditor(); }
   updateToolbar();
 }
@@ -912,7 +994,7 @@ function populateBulkEditor() {
 function onFieldInput() {
   if (primaryIndex < 0 || selectedIndices.size !== 1) return;
   files[primaryIndex].dirty = true;
-  renderFileList();
+  updateVisibleFileRow(primaryIndex);
   updateToolbar();
   updateRenamePreview();
 
@@ -920,6 +1002,12 @@ function onFieldInput() {
     clearTimeout(autoSaveTimer);
     autoSaveTimer = setTimeout(() => saveSingleFile(primaryIndex), 500);
   }
+}
+
+function updateVisibleFileRow(index) {
+  const row = document.querySelector(`[data-file-index="${index}"]`);
+  if (!row) return;
+  row.classList.toggle('dirty', !!files[index]?.dirty);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -997,11 +1085,9 @@ async function saveBulkFiles(total) {
   const trackStepNum  = /^\d+$/.test(trackStepRaw) ? Number(trackStepRaw) : 1;
   const effectiveTrackStep = trackStepNum > 0 ? trackStepNum : 1;
   const indices   = [...selectedIndices].sort((a, b) => a - b);
-  let saved=0, errors=0, renameErrors=0;
-  for (let order = 0; order < indices.length; order++) {
-    const i = indices[order];
+  const workItems = indices.map((i, order) => {
     const file = files[i];
-    const tags = {...file.tags};
+    const tags = { ...file.tags };
     if (bulkTitle)  tags.title      = bulkTitle;
     if (bulkArtist) tags.artist     = bulkArtist;
     if (bulkAlbum)  tags.album      = bulkAlbum;
@@ -1012,21 +1098,34 @@ async function saveBulkFiles(total) {
     else if (bulkTrack) tags.trackNumber = bulkTrack;
     if (bulkArtPending === 'remove') { tags.coverBase64=null; tags.coverMime=null; }
     else if (bulkArtPending && bulkArtPending.base64) { tags.coverBase64=bulkArtPending.base64; tags.coverMime=bulkArtPending.mime; }
-    const r = await window.tagAPI.writeTags(file.path, tags);
-    if (r.error) {
-      errors++;
-    } else {
-      file.tags=tags;
-      file.originalTags=clone(tags);
-      file.dirty=false;
-      saved++;
-      if (settings.autoRenameOnSave) {
-        const renameResult = await renameFileWithTemplate(i, settings.renameTemplate || '{track} - {title}', tags);
-        if (!renameResult.success && renameResult.error) renameErrors++;
+    return { index: i, file, tags };
+  });
+
+  let saved=0, errors=0, renameErrors=0;
+  const concurrency = Math.min(3, workItems.length);
+  let nextItem = 0;
+
+  async function worker() {
+    while (nextItem < workItems.length) {
+      const item = workItems[nextItem++];
+      const r = await window.tagAPI.writeTags(item.file.path, item.tags);
+      if (r.error) {
+        errors++;
+      } else {
+        item.file.tags = item.tags;
+        item.file.originalTags = clone(item.tags);
+        item.file.dirty = false;
+        saved++;
+        if (settings.autoRenameOnSave) {
+          const renameResult = await renameFileWithTemplate(item.index, settings.renameTemplate || '{track} - {title}', item.tags);
+          if (!renameResult.success && renameResult.error) renameErrors++;
+        }
       }
+      saveBtn.textContent = `Saving ${saved} / ${total}…`;
     }
-    saveBtn.textContent = `Saving ${saved} / ${total}…`;
   }
+
+  await Promise.all(Array.from({ length: concurrency }, () => worker()));
   bulkArtPending = null;
   renderFileList(); updateToolbar();
   if (errors === 0 && renameErrors === 0) {
@@ -1097,6 +1196,7 @@ async function runLookup() {
   if (!query) return;
   const currentFile = files[primaryIndex];
   if (!currentFile) return;
+  const requestId = ++activeLookupRequestId;
 
   const statusEl  = document.getElementById('lookup-status');
   const resultsEl = document.getElementById('lookup-results');
@@ -1105,17 +1205,16 @@ async function runLookup() {
   resultsEl.style.display = 'none';
   innerEl.innerHTML = '';
 
-  const promises = [];
-  if (settings.useMusicBrainz) promises.push(searchMusicBrainz(query));
-  if (settings.useITunes !== false) promises.push(searchITunes(query));
-  if (settings.useDiscogs && settings.discogsToken) promises.push(searchDiscogs(query));
-  if (settings.useLastFm && settings.lastFmKey) promises.push(searchLastFm(query));
+  const allResults = await gatherLookupResults(query);
 
-  if (!promises.length) { statusEl.textContent = 'No sources enabled in settings.'; return; }
+  if (!allResults.length && !hasLookupSourcesEnabled()) {
+    statusEl.textContent = 'No sources enabled in settings.';
+    return;
+  }
 
-  const allResults = (await Promise.allSettled(promises))
-    .flatMap(r => r.status==='fulfilled' ? r.value : [])
-    .sort((a,b) => (b.score||0)-(a.score||0));
+  if (requestId !== activeLookupRequestId || primaryIndex < 0 || files[primaryIndex]?.path !== currentFile.path) {
+    return;
+  }
 
   lookupState.filePath = currentFile.path;
   lookupState.query = query;
@@ -1128,10 +1227,46 @@ async function runLookup() {
     return;
   }
 
-  renderLookupResults(allResults);
+  renderLookupResults(allResults, requestId);
 }
 
-function renderLookupResults(results) {
+function hasLookupSourcesEnabled() {
+  return !!(
+    settings.useMusicBrainz ||
+    settings.useITunes ||
+    (settings.useDiscogs && settings.discogsToken) ||
+    (settings.useLastFm && settings.lastFmKey)
+  );
+}
+
+async function gatherLookupResults(query) {
+  if (!hasLookupSourcesEnabled()) return [];
+
+  let results = [];
+  if (settings.useMusicBrainz) {
+    const musicBrainzResults = await searchMusicBrainz(query);
+    results = results.concat(musicBrainzResults);
+    if ((musicBrainzResults[0]?.score || 0) >= 95) {
+      return musicBrainzResults.sort((a,b) => (b.score||0)-(a.score||0));
+    }
+  }
+
+  const fallbackPromises = [];
+  if (settings.useITunes) fallbackPromises.push(searchITunes(query));
+  if (settings.useDiscogs && settings.discogsToken) fallbackPromises.push(searchDiscogs(query));
+  if (settings.useLastFm && settings.lastFmKey) fallbackPromises.push(searchLastFm(query));
+
+  if (fallbackPromises.length) {
+    const fallbackResults = await Promise.allSettled(fallbackPromises);
+    results = results.concat(
+      fallbackResults.flatMap((r) => r.status === 'fulfilled' ? r.value : [])
+    );
+  }
+
+  return results.sort((a,b) => (b.score||0)-(a.score||0));
+}
+
+function renderLookupResults(results, requestId = activeLookupRequestId) {
   const resultsEl = document.getElementById('lookup-results');
   const innerEl = document.getElementById('lookup-results-inner');
 
@@ -1152,19 +1287,35 @@ function renderLookupResults(results) {
   resultsEl.style.display = 'block';
   window._lookupResults = results;
 
-  // async: load cover thumbs
-  results.forEach((r,i) => {
-    if (r.coverUrl) loadThumb(i, r.coverUrl);
-  });
+  loadThumbBatch(results, requestId);
 }
 
-function loadThumb(i, url) {
+function loadThumb(i, url, requestId) {
   const el = document.getElementById('rthumb-'+i); if (!el) return;
   window.tagAPI.fetchUrl(url).then(r => {
+    if (requestId !== activeLookupRequestId) return;
     if (r && r.ok && r.base64) {
       el.innerHTML = `<img src="${buildImageDataUrl(r.base64, r.mime)}" alt=""/>`;
     }
   }).catch(()=>{});
+}
+
+async function loadThumbBatch(results, requestId) {
+  const items = results
+    .map((result, index) => ({ result, index }))
+    .filter(({ result }) => !!result.coverUrl);
+  const concurrency = Math.min(3, items.length);
+  let nextItem = 0;
+
+  async function worker() {
+    while (nextItem < items.length) {
+      const item = items[nextItem++];
+      if (requestId !== activeLookupRequestId) return;
+      await loadThumb(item.index, item.result.coverUrl, requestId);
+    }
+  }
+
+  await Promise.all(Array.from({ length: concurrency }, () => worker()));
 }
 
 function applyResult(i) {
@@ -1180,8 +1331,10 @@ function applyResult(i) {
   if (r.trackNumber) { setVal('f-track', r.trackNumber); f.tags.trackNumber = r.trackNumber; }
 
   if (r.coverUrl) {
+    const selectedPath = f.path;
     window.tagAPI.fetchUrl(r.coverUrl).then(res => {
       if (res && res.ok && res.base64) {
+        if (primaryIndex < 0 || files[primaryIndex]?.path !== selectedPath) return;
         f.tags.coverBase64 = res.base64;
         f.tags.coverMime   = res.mime;
         f.dirty = true;
@@ -1212,6 +1365,7 @@ function applyResult(i) {
 }
 
 function clearLookupState() {
+  activeLookupRequestId++;
   lookupState = { filePath: '', query: '', status: '', results: [] };
   window._lookupResults = [];
   const statusEl = document.getElementById('lookup-status');
@@ -1221,6 +1375,14 @@ function clearLookupState() {
   if (resultsEl) resultsEl.style.display = 'none';
   if (innerEl) innerEl.innerHTML = '';
 }
+
+window.addEventListener('beforeunload', () => {
+  if (settingsSaveTimer) {
+    flushSettings();
+  }
+});
+
+document.getElementById('file-rows').addEventListener('scroll', scheduleFileListRender);
 
 // ── MusicBrainz ────────────────────────────────────────────────────────────
 async function searchMusicBrainz(query) {
@@ -1373,11 +1535,16 @@ async function applyRename() {
     showToast('No rename needed', 'success');
     return;
   }
+  const oldPath = f.path;
   const r    = await window.tagAPI.renameFile(f.path, base);
   if (r.error) { showToast('Rename failed: '+r.error, 'error'); return; }
   f.path = r.newPath;
   f.name = r.newPath.split('/').pop();
+  if (lookupState.filePath === oldPath) {
+    lookupState.filePath = f.path;
+  }
   renderFileList();
+  updateRenamePreview();
   showToast('File renamed', 'success');
   // update settings default template
   settings.renameTemplate = tpl;
@@ -1433,7 +1600,7 @@ function show(id) { const el=document.getElementById(id); if(el) el.style.displa
 function hide(id) { const el=document.getElementById(id); if(el) el.style.display='none'; }
 function getVal(id) { return document.getElementById(id)?.value||''; }
 function setVal(id,v){ const el=document.getElementById(id); if(el) el.value=v; }
-function clone(o) { return JSON.parse(JSON.stringify(o)); }
+function clone(o) { return o && typeof o === 'object' ? { ...o } : o; }
 function fmtDur(s) { const m=Math.floor(s/60); return `${m}:${Math.floor(s%60).toString().padStart(2,'0')}`; }
 function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 

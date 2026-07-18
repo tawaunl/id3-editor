@@ -1,11 +1,14 @@
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs   = require('fs');
+const fsp  = fs.promises;
 const os   = require('os');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
 const execFileAsync = promisify(execFile);
 const RELEASES_API_URL = 'https://api.github.com/repos/tawaunl/id3-editor/releases/latest';
+const SUPPORTED_AUDIO_EXTENSIONS = new Set(['.mp3', '.flac', '.aac', '.m4a', '.wav', '.aiff', '.aif']);
+let cachedFfmpegPath = null;
 
 let mainWindow;
 
@@ -31,32 +34,40 @@ app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) creat
 
 // ── helpers ────────────────────────────────────────────────────────────────
 function getFfmpegPath() {
+  if (cachedFfmpegPath) return cachedFfmpegPath;
+
   for (const c of ['/opt/homebrew/bin/ffmpeg','/usr/local/bin/ffmpeg','/usr/bin/ffmpeg','ffmpeg']) {
-    try { require('child_process').execFileSync(c,['-version'],{stdio:'ignore'}); return c; } catch {}
+    try {
+      require('child_process').execFileSync(c,['-version'],{stdio:'ignore'});
+      cachedFfmpegPath = c;
+      return cachedFfmpegPath;
+    } catch {}
   }
-  return 'ffmpeg';
+  cachedFfmpegPath = 'ffmpeg';
+  return cachedFfmpegPath;
 }
 
-function isMp3File(filePath) {
-  return path.extname(filePath).toLowerCase() === '.mp3';
+function isSupportedAudioFile(filePath) {
+  return SUPPORTED_AUDIO_EXTENSIONS.has(path.extname(filePath).toLowerCase());
 }
 
-function collectMp3FilesFromDir(dirPath, out = []) {
+async function collectAudioFilesFromDir(dirPath, out = []) {
   let entries = [];
   try {
-    entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    entries = await fsp.readdir(dirPath, { withFileTypes: true });
   } catch {
     return out;
   }
 
-  for (const entry of entries) {
+  await Promise.all(entries.map(async (entry) => {
     const fullPath = path.join(dirPath, entry.name);
     if (entry.isDirectory()) {
-      collectMp3FilesFromDir(fullPath, out);
-    } else if (entry.isFile() && isMp3File(fullPath)) {
+      await collectAudioFilesFromDir(fullPath, out);
+    } else if (entry.isFile() && isSupportedAudioFile(fullPath)) {
       out.push(fullPath);
     }
-  }
+  }));
+
   return out;
 }
 
@@ -212,10 +223,10 @@ ipcMain.handle('open-files', async () => {
   const out = [];
   for (const selectedPath of r.filePaths || []) {
     try {
-      const stat = fs.statSync(selectedPath);
+      const stat = await fsp.stat(selectedPath);
       if (stat.isDirectory()) {
-        collectMp3FilesFromDir(selectedPath, out);
-      } else if (stat.isFile() && isMp3File(selectedPath)) {
+        await collectAudioFilesFromDir(selectedPath, out);
+      } else if (stat.isFile() && isSupportedAudioFile(selectedPath)) {
         out.push(selectedPath);
       }
     } catch {
@@ -227,12 +238,13 @@ ipcMain.handle('open-files', async () => {
 });
 
 // ── read tags ──────────────────────────────────────────────────────────────
-ipcMain.handle('read-tags', async (_e, filePath) => {
+ipcMain.handle('read-tags', async (_e, filePath, options = {}) => {
   try {
     const { parseFile } = await import('music-metadata');
-    const md = await parseFile(filePath, { skipCovers: false });
+    const skipCovers = options.skipCovers !== false;
+    const md = await parseFile(filePath, { skipCovers });
     const c  = md.common;
-    const { coverBase64, coverMime } = extractCoverFromMetadata(md);
+    const { coverBase64, coverMime } = skipCovers ? { coverBase64: null, coverMime: null } : extractCoverFromMetadata(md);
     return {
       title: c.title||'', artist: c.artist||'', album: c.album||'',
       genre: (c.genre&&c.genre[0])||'',
@@ -240,6 +252,7 @@ ipcMain.handle('read-tags', async (_e, filePath) => {
       trackNumber: c.track&&c.track.no ? String(c.track.no) : '',
       trackTotal:  c.track&&c.track.of ? String(c.track.of) : '',
       coverBase64, coverMime,
+      coverLoaded: !skipCovers,
       format: md.format.container || path.extname(filePath).slice(1).toUpperCase(),
       duration: md.format.duration||0,
       bitrate:  md.format.bitrate||0,
@@ -250,6 +263,8 @@ ipcMain.handle('read-tags', async (_e, filePath) => {
 // ── write tags ─────────────────────────────────────────────────────────────
 ipcMain.handle('write-tags', async (_e, filePath, tags) => {
   const ext = path.extname(filePath).toLowerCase();
+  let coverTmpPath = null;
+  let tmpOut = null;
   try {
     if (ext === '.mp3') {
       const NodeID3 = require('node-id3');
@@ -267,7 +282,7 @@ ipcMain.handle('write-tags', async (_e, filePath, tags) => {
       return { success: true };
     }
     // non-MP3: ffmpeg re-mux
-    const tmpOut = path.join(os.tmpdir(), `tagedit_${Date.now()}${ext}`);
+    tmpOut = path.join(os.tmpdir(), `tagedit_${process.pid}_${Date.now()}_${Math.random().toString(16).slice(2)}${ext}`);
     const metaArgs = [];
     if (tags.title)       metaArgs.push('-metadata',`title=${tags.title}`);
     if (tags.artist)      metaArgs.push('-metadata',`artist=${tags.artist}`);
@@ -275,15 +290,13 @@ ipcMain.handle('write-tags', async (_e, filePath, tags) => {
     if (tags.genre)       metaArgs.push('-metadata',`genre=${tags.genre}`);
     if (tags.year)        metaArgs.push('-metadata',`date=${tags.year}`);
     if (tags.trackNumber) metaArgs.push('-metadata',`track=${tags.trackNumber}${tags.trackTotal?'/'+tags.trackTotal:''}`);
-
-    let coverTmpPath = null;
     const coverArgs = [];
     if (tags.coverBase64) {
       const coverBuffer = Buffer.from(tags.coverBase64,'base64');
       const coverMime = normalizeImageMime(tags.coverMime, guessImageMime(coverBuffer));
       const coverExt = coverMime === 'image/png' ? '.png' : (coverMime === 'image/webp' ? '.webp' : '.jpg');
-      coverTmpPath = path.join(os.tmpdir(),`cover_${Date.now()}${coverExt}`);
-      fs.writeFileSync(coverTmpPath, coverBuffer);
+      coverTmpPath = path.join(os.tmpdir(),`cover_${process.pid}_${Date.now()}_${Math.random().toString(16).slice(2)}${coverExt}`);
+      await fsp.writeFile(coverTmpPath, coverBuffer);
       if (ext==='.flac') {
         coverArgs.push('-i',coverTmpPath,'-map','0:a','-map','1:v','-c:a','copy','-c:v','mjpeg','-disposition:v','attached_pic');
       } else if (ext==='.m4a'||ext==='.aac') {
@@ -295,11 +308,15 @@ ipcMain.handle('write-tags', async (_e, filePath, tags) => {
       coverArgs.push('-map','0:a','-c:a','copy');
     }
     await execFileAsync(getFfmpegPath(), ['-y','-i',filePath,...coverArgs,...metaArgs,tmpOut]);
-    fs.copyFileSync(tmpOut, filePath);
-    fs.unlinkSync(tmpOut);
-    if (coverTmpPath) fs.unlinkSync(coverTmpPath);
+    await fsp.copyFile(tmpOut, filePath);
     return { success: true };
   } catch(err) { return { error: err.message }; }
+  finally {
+    await Promise.all([
+      tmpOut ? fsp.unlink(tmpOut).catch(() => {}) : Promise.resolve(),
+      coverTmpPath ? fsp.unlink(coverTmpPath).catch(() => {}) : Promise.resolve(),
+    ]);
+  }
 });
 
 // ── rename file ────────────────────────────────────────────────────────────
@@ -388,10 +405,14 @@ ipcMain.handle('open-external-url', async (_e, url) => {
 
 // ── save settings ──────────────────────────────────────────────────────────
 const settingsPath = path.join(app.getPath('userData'), 'settings.json');
-ipcMain.handle('load-settings', () => {
-  try { return JSON.parse(fs.readFileSync(settingsPath,'utf8')); } catch { return {}; }
+ipcMain.handle('load-settings', async () => {
+  try {
+    return JSON.parse(await fsp.readFile(settingsPath,'utf8'));
+  } catch {
+    return {};
+  }
 });
-ipcMain.handle('save-settings', (_e, settings) => {
-  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+ipcMain.handle('save-settings', async (_e, settings) => {
+  await fsp.writeFile(settingsPath, JSON.stringify(settings, null, 2));
   return { success: true };
 });
