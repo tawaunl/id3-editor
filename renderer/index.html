@@ -371,7 +371,7 @@ input[type=text].mixed{border-color:var(--warn);color:var(--warn)}
         </div>
         <div><div id="bulk-title">Bulk Edit</div><div id="bulk-subtitle"></div></div>
       </div>
-      <div class="bulk-note">Only filled fields will be applied. Blank fields are left as-is. Title is always per-file.</div>
+      <div class="bulk-note">Only filled fields will be applied. Blank fields are left as-is. You can also assign sequential track numbers.</div>
       <div id="bulk-art-row">
         <div id="bulk-art-thumb" onclick="bulkPickCover()">
           <img id="bulk-art-img" alt="Shared art"/>
@@ -389,6 +389,7 @@ input[type=text].mixed{border-color:var(--warn);color:var(--warn)}
       </div>
       <div class="section-label">Apply to All Selected</div>
       <div class="field-group">
+        <div class="field"><label>Title</label><input type="text" id="bf-title"  placeholder="Leave blank to keep each file's value"/></div>
         <div class="field"><label>Artist</label><input type="text" id="bf-artist" placeholder="Leave blank to keep each file's value"/></div>
         <div class="field"><label>Album</label><input type="text" id="bf-album"  placeholder="Leave blank to keep each file's value"/></div>
       </div>
@@ -397,6 +398,11 @@ input[type=text].mixed{border-color:var(--warn);color:var(--warn)}
         <div class="field"><label>Genre</label><input type="text" id="bf-genre" placeholder="—"/></div>
         <div class="field"><label>Year</label><input type="text" id="bf-year"  placeholder="—"/></div>
         <div class="field"><label>Total Tracks</label><input type="text" id="bf-total" placeholder="—"/></div>
+      </div>
+      <div class="field-group cols-3" style="margin-top:10px">
+        <div class="field"><label>Track # (same for all)</label><input type="text" id="bf-track" placeholder="—"/></div>
+        <div class="field"><label>Track Start #</label><input type="text" id="bf-track-start" placeholder="1"/></div>
+        <div class="field"><label>Track Step</label><input type="text" id="bf-track-step" placeholder="1"/></div>
       </div>
     </div>
   </div>
@@ -675,7 +681,10 @@ function populateBulkEditor() {
     document.getElementById('bulk-art-desc').textContent = sharedCover ? 'No artwork on any file.' : 'Mixed artwork across files.';
   }
 
-  [['bf-artist','artist'],['bf-album','album'],['bf-genre','genre'],['bf-year','year'],['bf-total','trackTotal']].forEach(([id,key]) => {
+  setVal('bf-track-start', '');
+  setVal('bf-track-step', '');
+
+  [['bf-title','title'],['bf-artist','artist'],['bf-album','album'],['bf-genre','genre'],['bf-year','year'],['bf-total','trackTotal'],['bf-track','trackNumber']].forEach(([id,key]) => {
     const vals    = sel.map(f => f.tags[key]||'');
     const allSame = vals.every(v => v === vals[0]);
     const el      = document.getElementById(id);
@@ -757,21 +766,33 @@ async function saveSingleFile(index) {
 
 async function saveBulkFiles(total) {
   const saveBtn   = document.getElementById('save-btn');
+  const bulkTitle  = getVal('bf-title').trim();
   const bulkArtist = getVal('bf-artist').trim();
   const bulkAlbum  = getVal('bf-album').trim();
   const bulkGenre  = getVal('bf-genre').trim();
   const bulkYear   = getVal('bf-year').trim();
   const bulkTotal  = getVal('bf-total').trim();
-  const indices   = [...selectedIndices];
+  const bulkTrack  = getVal('bf-track').trim();
+  const trackStartRaw = getVal('bf-track-start').trim();
+  const trackStepRaw  = getVal('bf-track-step').trim();
+  const hasTrackStart = /^\d+$/.test(trackStartRaw);
+  const trackStartNum = hasTrackStart ? Number(trackStartRaw) : 0;
+  const trackStepNum  = /^\d+$/.test(trackStepRaw) ? Number(trackStepRaw) : 1;
+  const effectiveTrackStep = trackStepNum > 0 ? trackStepNum : 1;
+  const indices   = [...selectedIndices].sort((a, b) => a - b);
   let saved=0, errors=0;
-  for (const i of indices) {
+  for (let order = 0; order < indices.length; order++) {
+    const i = indices[order];
     const file = files[i];
     const tags = {...file.tags};
+    if (bulkTitle)  tags.title      = bulkTitle;
     if (bulkArtist) tags.artist     = bulkArtist;
     if (bulkAlbum)  tags.album      = bulkAlbum;
     if (bulkGenre)  tags.genre      = bulkGenre;
     if (bulkYear)   tags.year       = bulkYear;
     if (bulkTotal)  tags.trackTotal = bulkTotal;
+    if (hasTrackStart) tags.trackNumber = String(trackStartNum + (order * effectiveTrackStep));
+    else if (bulkTrack) tags.trackNumber = bulkTrack;
     if (bulkArtPending === 'remove') { tags.coverBase64=null; tags.coverMime=null; }
     else if (bulkArtPending && bulkArtPending.base64) { tags.coverBase64=bulkArtPending.base64; tags.coverMime=bulkArtPending.mime; }
     const r = await window.tagAPI.writeTags(file.path, tags);

@@ -61,6 +61,9 @@ npm start
 - Click **Open Files** in the sidebar, or drag and drop audio files onto the window.
 - Select a file from the sidebar to load its tags into the editor.
 - Edit any fields on the right.
+- Select multiple files (Cmd/Ctrl-click or Shift-click) to enter **Bulk Edit** mode.
+- In Bulk Edit, apply shared fields (Title, Artist, Album, Genre, Year, Total Tracks) to all selected files.
+- Use **Track Start #** and **Track Step** for sequential track numbering across selected files.
 - Click the album art area (or the Change button) to replace artwork.
 - Press **Cmd+S** or click **Save Tags** to write changes back to the file.
 - The dot indicator on a file name means you have unsaved changes.
