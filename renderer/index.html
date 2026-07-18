@@ -31,13 +31,14 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text'
 #file-search{width:100%;padding:7px 10px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:12px;font-family:inherit;outline:none;user-select:text}
 #file-search:focus{border-color:var(--accent)}
 #file-search::placeholder{color:var(--text-muted)}
-#file-table-head{display:grid;grid-template-columns:1.4fr 1fr 1fr .9fr;gap:6px;padding:0 12px 6px;-webkit-app-region:no-drag}
-.col-head{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted);background:transparent;border:none;text-align:left;cursor:pointer;padding:5px 7px;border-radius:var(--radius-sm);display:flex;align-items:center;gap:4px}
-.col-head:hover{background:var(--surface2);color:var(--text-dim)}
-.col-head .sort-mark{font-size:10px;color:var(--accent);min-width:8px}
 #file-list{flex:1;overflow-y:auto;padding:0 8px 8px;-webkit-app-region:no-drag}
 #file-list::-webkit-scrollbar{width:4px}
 #file-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+#file-table-head{position:sticky;top:0;z-index:3;display:grid;grid-template-columns:1.4fr 1fr 1fr .9fr;gap:6px;padding:6px 4px 6px;background:linear-gradient(to bottom,var(--surface) 82%,rgba(30,30,32,.92) 100%);border-bottom:1px solid var(--border);-webkit-app-region:no-drag}
+.col-head{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted);background:transparent;border:none;text-align:left;cursor:pointer;padding:5px 7px;border-radius:var(--radius-sm);display:flex;align-items:center;gap:4px}
+.col-head:hover{background:var(--surface2);color:var(--text-dim)}
+.col-head .sort-mark{font-size:10px;color:var(--accent);min-width:8px}
+#file-rows{padding-top:4px}
 .file-row{display:grid;grid-template-columns:1.4fr 1fr 1fr .9fr;gap:6px;align-items:center;padding:6px 6px;border-radius:var(--radius-sm);cursor:pointer;transition:background .1s;position:relative}
 .file-row:hover{background:var(--surface2)}
 .file-row.selected{background:rgba(99,102,241,.2)}
@@ -213,13 +214,15 @@ input[type=text].mixed{border-color:var(--warn);color:var(--warn)}
   <div id="sidebar-search-wrap">
     <input id="file-search" type="text" placeholder="Search title, artist, album, genre..." oninput="onFileFilterInput()"/>
   </div>
-  <div id="file-table-head">
-    <button class="col-head" onclick="setFileSort('title')">Title <span id="sort-title" class="sort-mark"></span></button>
-    <button class="col-head" onclick="setFileSort('artist')">Artist <span id="sort-artist" class="sort-mark"></span></button>
-    <button class="col-head" onclick="setFileSort('album')">Album <span id="sort-album" class="sort-mark"></span></button>
-    <button class="col-head" onclick="setFileSort('genre')">Genre <span id="sort-genre" class="sort-mark"></span></button>
+  <div id="file-list">
+    <div id="file-table-head">
+      <button class="col-head" onclick="setFileSort('title')">Title <span id="sort-title" class="sort-mark"></span></button>
+      <button class="col-head" onclick="setFileSort('artist')">Artist <span id="sort-artist" class="sort-mark"></span></button>
+      <button class="col-head" onclick="setFileSort('album')">Album <span id="sort-album" class="sort-mark"></span></button>
+      <button class="col-head" onclick="setFileSort('genre')">Genre <span id="sort-genre" class="sort-mark"></span></button>
+    </div>
+    <div id="file-rows"><div id="empty-sidebar">Drop files here or click Open Files.</div></div>
   </div>
-  <div id="file-list"><div id="empty-sidebar">Drop files here or click Open Files.</div></div>
   <div id="sel-hint"></div>
 </div>
 
@@ -287,6 +290,10 @@ input[type=text].mixed{border-color:var(--warn);color:var(--warn)}
       </div>
       <div class="settings-section">
         <h3>File Renaming</h3>
+        <div class="setting-row">
+          <div><div class="setting-label">Auto-rename on save</div><div class="setting-desc">Uses the rename template after saving tags</div></div>
+          <button class="toggle" id="toggle-auto-rename-save" onclick="toggleSetting('autoRenameOnSave')"></button>
+        </div>
         <div style="margin-bottom:8px">
           <label style="font-size:11px;color:var(--text-dim)">Default rename template</label>
           <input class="settings-input" id="input-rename-template" type="text" placeholder="{track} - {title}" oninput="onSettingInput()"/>
@@ -443,6 +450,7 @@ let fileSortDir      = 'asc';
 const settings = {
   autoSaveOnChange:  false,
   autoSaveOnSwitch:  false,
+  autoRenameOnSave:  false,
   useMusicBrainz:    true,
   useITunes:         true,
   useDiscogs:        false,
@@ -487,6 +495,7 @@ function insertToken(tok) {
 function applySettingsToUI() {
   setToggle('toggle-autosave-change', settings.autoSaveOnChange);
   setToggle('toggle-autosave-switch', settings.autoSaveOnSwitch);
+  setToggle('toggle-auto-rename-save', settings.autoRenameOnSave);
   setToggle('toggle-mb',      settings.useMusicBrainz);
   setToggle('toggle-itunes',  settings.useITunes !== false);
   setToggle('toggle-discogs', settings.useDiscogs);
@@ -673,20 +682,20 @@ function handleClick(index, shiftKey, metaKey) {
 // RENDER FILE LIST
 // ═══════════════════════════════════════════════════════════════════════════
 function renderFileList() {
-  const list = document.getElementById('file-list');
+  const rows = document.getElementById('file-rows');
   updateSortIndicators();
 
   if (!files.length) {
-    list.innerHTML = '<div id="empty-sidebar">Drop files here or click Open Files.</div>';
+    rows.innerHTML = '<div id="empty-sidebar">Drop files here or click Open Files.</div>';
     document.getElementById('sel-hint').style.display = 'none';
     return;
   }
 
   const visible = getVisibleFileIndices();
   if (!visible.length) {
-    list.innerHTML = '<div id="empty-sidebar">No files match your search.</div>';
+    rows.innerHTML = '<div id="empty-sidebar">No files match your search.</div>';
   } else {
-    list.innerHTML = visible.map((i) => {
+    rows.innerHTML = visible.map((i) => {
     const f = files[i];
     const isPrimary  = i === primaryIndex;
     const isSelected = selectedIndices.has(i) && !isPrimary;
@@ -855,6 +864,13 @@ async function saveSingleFile(index) {
   const r = await window.tagAPI.writeTags(file.path, tags);
   if (r.error) { showToast('Error: '+r.error,'error'); return; }
   file.tags = tags; file.originalTags = clone(tags); file.dirty = false;
+  if (settings.autoRenameOnSave) {
+    const template = getVal('rename-template') || settings.renameTemplate || '{track} - {title}';
+    const renameResult = await renameFileWithTemplate(index, template, tags);
+    if (!renameResult.success && renameResult.error) {
+      showToast('Saved, rename failed: ' + renameResult.error, 'warn');
+    }
+  }
   renderFileList(); updateToolbar();
   showToast('Saved', 'success');
 }
@@ -875,7 +891,7 @@ async function saveBulkFiles(total) {
   const trackStepNum  = /^\d+$/.test(trackStepRaw) ? Number(trackStepRaw) : 1;
   const effectiveTrackStep = trackStepNum > 0 ? trackStepNum : 1;
   const indices   = [...selectedIndices].sort((a, b) => a - b);
-  let saved=0, errors=0;
+  let saved=0, errors=0, renameErrors=0;
   for (let order = 0; order < indices.length; order++) {
     const i = indices[order];
     const file = files[i];
@@ -891,12 +907,31 @@ async function saveBulkFiles(total) {
     if (bulkArtPending === 'remove') { tags.coverBase64=null; tags.coverMime=null; }
     else if (bulkArtPending && bulkArtPending.base64) { tags.coverBase64=bulkArtPending.base64; tags.coverMime=bulkArtPending.mime; }
     const r = await window.tagAPI.writeTags(file.path, tags);
-    if (r.error) errors++; else { file.tags=tags; file.originalTags=clone(tags); file.dirty=false; saved++; }
+    if (r.error) {
+      errors++;
+    } else {
+      file.tags=tags;
+      file.originalTags=clone(tags);
+      file.dirty=false;
+      saved++;
+      if (settings.autoRenameOnSave) {
+        const renameResult = await renameFileWithTemplate(i, settings.renameTemplate || '{track} - {title}', tags);
+        if (!renameResult.success && renameResult.error) renameErrors++;
+      }
+    }
     saveBtn.textContent = `Saving ${saved} / ${total}…`;
   }
   bulkArtPending = null;
   renderFileList(); updateToolbar();
-  showToast(errors===0 ? `Saved ${saved} files` : `${saved} saved, ${errors} failed`, errors===0?'success':'warn');
+  if (errors === 0 && renameErrors === 0) {
+    showToast(`Saved ${saved} files`, 'success');
+  } else if (errors === 0 && renameErrors > 0) {
+    showToast(`${saved} saved, ${renameErrors} rename failed`, 'warn');
+  } else if (errors > 0 && renameErrors === 0) {
+    showToast(`${saved} saved, ${errors} failed`, 'warn');
+  } else {
+    showToast(`${saved} saved, ${errors} failed, ${renameErrors} rename failed`, 'warn');
+  }
   populateBulkEditor();
 }
 
@@ -1189,6 +1224,17 @@ async function applyRename() {
   settings.renameTemplate = tpl;
   document.getElementById('input-rename-template').value = tpl;
   persistSettings();
+}
+
+async function renameFileWithTemplate(index, template, tags) {
+  const f = files[index];
+  if (!f) return { success: false, error: 'File not found' };
+  const base = buildName(template, tags || f.tags, f.name).replace(/\.[^.]+$/, '');
+  const r = await window.tagAPI.renameFile(f.path, base);
+  if (r.error) return { success: false, error: r.error };
+  f.path = r.newPath;
+  f.name = r.newPath.split('/').pop();
+  return { success: true };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
