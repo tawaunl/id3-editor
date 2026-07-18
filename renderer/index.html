@@ -1249,9 +1249,59 @@ function rankLookupResults(results) {
   });
 }
 
-async function gatherLookupResults(query) {
-  if (!hasLookupSourcesEnabled()) return [];
+function buildLookupQueries(query) {
+  const normalized = String(query || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return [];
 
+  const variants = new Set([normalized]);
+  const keepTerms = ['extended mix', 'extended version', 'club mix', 'remix'];
+  const noisyTerms = ['intro', 'dirty', 'clean', 'acapella', 'instrumental', 'explicit', 'radio edit', 'quick hit', 'hook first', 'transition', 'redrum', 're-drum', 'short edit', 'super clean'];
+
+  const stripDescriptorSegments = (input, removableTerms) => {
+    let value = input;
+    const shouldRemove = (segment) => {
+      const lower = segment.toLowerCase();
+      const hasKeep = keepTerms.some((term) => lower.includes(term));
+      const hasRemovable = removableTerms.some((term) => lower.includes(term));
+      return hasRemovable && !hasKeep;
+    };
+
+    value = value.replace(/\(([^)]*)\)|\[([^\]]*)\]/g, (match, paren, bracket) => {
+      const content = paren || bracket || '';
+      return shouldRemove(content) ? ' ' : match;
+    });
+
+    value = value.replace(/\s-\s([^\-()\[\]]+)$/g, (match, segment) => (
+      shouldRemove(segment) ? ' ' : match
+    ));
+
+    return value.replace(/\s{2,}/g, ' ').replace(/\s+-\s+/g, ' - ').trim();
+  };
+
+  const cleaned = stripDescriptorSegments(normalized, noisyTerms);
+  if (cleaned) variants.add(cleaned);
+
+  const broad = stripDescriptorSegments(cleaned, noisyTerms.concat(keepTerms));
+  if (broad) variants.add(broad);
+
+  return [...variants].filter(Boolean);
+}
+
+function dedupeLookupResults(results) {
+  const byKey = new Map();
+  for (const result of results) {
+    const key = [result.source, result.title, result.artist, result.album]
+      .map((part) => String(part || '').trim().toLowerCase())
+      .join('|');
+    const existing = byKey.get(key);
+    if (!existing || (result.coverUrl && !existing.coverUrl) || ((result.score || 0) > (existing.score || 0))) {
+      byKey.set(key, result);
+    }
+  }
+  return [...byKey.values()];
+}
+
+async function fetchLookupResultsForQuery(query) {
   let results = [];
   let musicBrainzResults = [];
   let iTunesResults = [];
@@ -1268,10 +1318,6 @@ async function gatherLookupResults(query) {
 
   results = results.concat(musicBrainzResults, iTunesResults, discogsResults);
 
-  if ((musicBrainzResults[0]?.score || 0) >= 95) {
-    return rankLookupResults(results);
-  }
-
   const fallbackPromises = [];
   if (settings.useLastFm && settings.lastFmKey) fallbackPromises.push(searchLastFm(query));
 
@@ -1282,7 +1328,17 @@ async function gatherLookupResults(query) {
     );
   }
 
-  return rankLookupResults(results);
+  return results;
+}
+
+async function gatherLookupResults(query) {
+  if (!hasLookupSourcesEnabled()) return [];
+
+  const queryVariants = buildLookupQueries(query);
+  const settled = await Promise.allSettled(queryVariants.map((variant) => fetchLookupResultsForQuery(variant)));
+  const combined = settled.flatMap((result) => result.status === 'fulfilled' ? result.value : []);
+
+  return rankLookupResults(dedupeLookupResults(combined));
 }
 
 function renderLookupResults(results, requestId = activeLookupRequestId) {
