@@ -471,6 +471,7 @@ let fileSortKey      = 'title';
 let fileSortDir      = 'asc';
 let updateCheckInProgress = false;
 let latestReleaseUrl = '';
+let lookupState = { filePath: '', query: '', status: '', results: [] };
 
 const settings = {
   autoSaveOnChange:  false,
@@ -734,6 +735,8 @@ function updateSortIndicators() {
 // SELECTION
 // ═══════════════════════════════════════════════════════════════════════════
 function handleClick(index, shiftKey, metaKey) {
+  const prevPrimaryIndex = primaryIndex;
+
   // auto-save on switch if enabled and leaving a dirty single selection
   if (settings.autoSaveOnSwitch && selectedIndices.size === 1 && primaryIndex >= 0 && files[primaryIndex].dirty) {
     saveSingleFile(primaryIndex);
@@ -759,6 +762,11 @@ function handleClick(index, shiftKey, metaKey) {
     selectedIndices.clear();
     selectedIndices.add(index);
     primaryIndex = lastClickIndex = index;
+  }
+
+  const switchedTrack = prevPrimaryIndex !== primaryIndex;
+  if (switchedTrack || selectedIndices.size !== 1) {
+    clearLookupState();
   }
 
   renderFileList();
@@ -842,13 +850,24 @@ function populateSingleEditor(index) {
   document.getElementById('info-duration').textContent = t.duration ? fmtDur(t.duration) : '—';
   document.getElementById('info-bitrate').textContent  = t.bitrate  ? Math.round(t.bitrate/1000)+' kbps' : '—';
 
-  // auto-fill lookup query
-  autoFillQuery();
+  // Keep lookup options for the same track so users can switch choices without re-searching.
+  if (lookupState.filePath === f.path && lookupState.results.length > 0) {
+    setVal('lookup-query', lookupState.query || '');
+    document.getElementById('lookup-status').textContent = lookupState.status || `${lookupState.results.length} result${lookupState.results.length > 1 ? 's' : ''}`;
+    renderLookupResults(lookupState.results);
+  } else if (lookupState.filePath === f.path && lookupState.query) {
+    setVal('lookup-query', lookupState.query);
+    document.getElementById('lookup-status').textContent = lookupState.status || '';
+    document.getElementById('lookup-results').style.display = 'none';
+  } else {
+    autoFillQuery();
+    document.getElementById('lookup-results').style.display = 'none';
+    document.getElementById('lookup-status').textContent = '';
+  }
+
   // set rename template from settings
   document.getElementById('rename-template').value = settings.renameTemplate || '{track} - {title}';
   updateRenamePreview();
-  document.getElementById('lookup-results').style.display = 'none';
-  document.getElementById('lookup-status').textContent = '';
 }
 
 function populateBulkEditor() {
@@ -1076,6 +1095,9 @@ function autoFillQuery() {
 async function runLookup() {
   const query = document.getElementById('lookup-query').value.trim();
   if (!query) return;
+  const currentFile = files[primaryIndex];
+  if (!currentFile) return;
+
   const statusEl  = document.getElementById('lookup-status');
   const resultsEl = document.getElementById('lookup-results');
   const innerEl   = document.getElementById('lookup-results-inner');
@@ -1095,10 +1117,25 @@ async function runLookup() {
     .flatMap(r => r.status==='fulfilled' ? r.value : [])
     .sort((a,b) => (b.score||0)-(a.score||0));
 
-  statusEl.textContent = allResults.length ? `${allResults.length} result${allResults.length>1?'s':''}` : 'No results found.';
-  if (!allResults.length) return;
+  lookupState.filePath = currentFile.path;
+  lookupState.query = query;
+  lookupState.results = allResults;
+  lookupState.status = allResults.length ? `${allResults.length} result${allResults.length>1?'s':''}` : 'No results found.';
 
-  innerEl.innerHTML = allResults.map((r,i) => `
+  statusEl.textContent = lookupState.status;
+  if (!allResults.length) {
+    window._lookupResults = [];
+    return;
+  }
+
+  renderLookupResults(allResults);
+}
+
+function renderLookupResults(results) {
+  const resultsEl = document.getElementById('lookup-results');
+  const innerEl = document.getElementById('lookup-results-inner');
+
+  innerEl.innerHTML = results.map((r,i) => `
     <div class="result-card" onclick="applyResult(${i})">
       <div class="result-thumb" id="rthumb-${i}">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M12 8v8M8 12h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
@@ -1113,10 +1150,10 @@ async function runLookup() {
   `).join('');
 
   resultsEl.style.display = 'block';
-  window._lookupResults = allResults;
+  window._lookupResults = results;
 
   // async: load cover thumbs
-  allResults.forEach((r,i) => {
+  results.forEach((r,i) => {
     if (r.coverUrl) loadThumb(i, r.coverUrl);
   });
 }
@@ -1148,7 +1185,16 @@ function applyResult(i) {
         f.tags.coverBase64 = res.base64;
         f.tags.coverMime   = res.mime;
         f.dirty = true;
-        populateSingleEditor(idx);
+        if (idx === primaryIndex && selectedIndices.size === 1) {
+          const artImg = document.getElementById('art-img');
+          const artPh = document.getElementById('art-placeholder');
+          setImageWithFallback(artImg, f.tags.coverBase64, f.tags.coverMime, () => {
+            artImg.style.display = 'none';
+            artPh.style.display = 'flex';
+          });
+          artImg.style.display = 'block';
+          artPh.style.display = 'none';
+        }
         renderFileList();
         updateToolbar();
       }
@@ -1163,6 +1209,17 @@ function applyResult(i) {
     clearTimeout(autoSaveTimer);
     autoSaveTimer = setTimeout(() => saveSingleFile(idx), 500);
   }
+}
+
+function clearLookupState() {
+  lookupState = { filePath: '', query: '', status: '', results: [] };
+  window._lookupResults = [];
+  const statusEl = document.getElementById('lookup-status');
+  const resultsEl = document.getElementById('lookup-results');
+  const innerEl = document.getElementById('lookup-results-inner');
+  if (statusEl) statusEl.textContent = '';
+  if (resultsEl) resultsEl.style.display = 'none';
+  if (innerEl) innerEl.innerHTML = '';
 }
 
 // ── MusicBrainz ────────────────────────────────────────────────────────────
